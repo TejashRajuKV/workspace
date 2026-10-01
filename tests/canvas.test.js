@@ -134,15 +134,32 @@ test("validateCanvasOp rejects malformed / oversized input", () => {
     validateCanvasOp({ type: OP.CREATE, oid: "a", p: { object: { id: "a", type: "hacker", payload: rect(0, 0) } } }).ok,
     false
   );
+  // real wire shape: geometry lives in the nested payload
   const ok = validateCanvasOp({
     type: OP.CREATE,
     oid: "a",
-    p: { object: { id: "a", type: "rectangle", x: 1, y: 2, w: 3, h: 4, style: { fill: "#fff" }, data: {} } },
+    p: {
+      object: {
+        id: "a",
+        type: "rectangle",
+        z: 3,
+        payload: { x: 94, y: 5, w: 150, h: 100, rot: 0, style: { fill: "#dbe4f0", stroke: "#334155", strokeWidth: 2 }, data: {} },
+      },
+    },
   });
   assert.equal(ok.ok, true);
-  assert.deepEqual([ok.op.p.object.payload.x, ok.op.p.object.payload.y], [1, 2]);
+  assert.deepEqual(
+    [ok.op.p.object.payload.x, ok.op.p.object.payload.y, ok.op.p.object.payload.w, ok.op.p.object.payload.h],
+    [94, 5, 150, 100],
+    "CREATE geometry must survive validation (regression: payload reset to 0,0,100,100)"
+  );
+  assert.deepEqual(
+    [ok.op.p.object.payload.style.fill, ok.op.p.object.payload.style.strokeWidth],
+    ["#dbe4f0", 2],
+    "CREATE style must survive validation"
+  );
   assert.equal(ok.op.p.object.type, "rectangle");
-  assert.equal(ok.op.p.object.z, 0);
+  assert.equal(ok.op.p.object.z, 3);
 });
 
 test("normalizeObjectPayload clamps and sanitizes", () => {

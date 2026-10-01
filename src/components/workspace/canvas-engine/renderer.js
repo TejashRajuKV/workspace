@@ -378,6 +378,15 @@ export function createRenderer(canvas, quad) {
       if (obj) objs.push(obj);
     }
     objs.sort((a, b) => (a.z || 0) - (b.z || 0));
+    // World transform: objects, selection overlays and the in-progress
+    // preview are all authored in world coordinates (overlays divide sizes
+    // by zoom to stay screen-constant). Without this transform objects
+    // ignore camera pan/zoom entirely — they rendered as if camera was
+    // always (0,0,zoom=1). Grid/cursors/marquee below use worldToScreen
+    // and stay in screen space.
+    ctx.save();
+    ctx.translate(-cam.x * cam.zoom, -cam.y * cam.zoom);
+    ctx.scale(cam.zoom, cam.zoom);
     for (const obj of objs) drawObject(obj, cam, selSet, remoteSelColors);
 
     // preview (in-progress creation)
@@ -389,6 +398,7 @@ export function createRenderer(canvas, quad) {
         new Map()
       );
     }
+    ctx.restore();
 
     // marquee
     if (marquee) {

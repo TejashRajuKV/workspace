@@ -31,6 +31,7 @@ export default function CanvasBoard() {
 
     let raf = 0;
     let lastObjectsSize = -1;
+    let lastSig = "";
     const loop = () => {
       const s = useBoard.getState();
 
@@ -39,6 +40,7 @@ export default function CanvasBoard() {
         boardRefs.fullRebuild = false;
         quad.clear();
         for (const [id, obj] of s.objects) quad.insert(id, objectBounds(obj));
+        renderer.markDirty(); // joined/bootstrap objects must appear
       } else if (boardRefs.changedIds.size) {
         for (const id of boardRefs.changedIds) {
           const obj = s.objects.get(id);
@@ -46,6 +48,16 @@ export default function CanvasBoard() {
           else quad.remove(id);
         }
         boardRefs.changedIds.clear();
+        renderer.markDirty(); // remote + local ops change what is drawn
+      }
+
+      // repaint on camera moves and presence/selection ticks — the renderer
+      // skips frames while "clean", so without this pan/zoom and remote
+      // cursors would leave the canvas frozen until the next local drag
+      const sig = `${s.camera.x}|${s.camera.y}|${s.camera.zoom}|${boardRefs.renderTick}|${s.selection.join(",")}`;
+      if (sig !== lastSig) {
+        lastSig = sig;
+        renderer.markDirty();
       }
 
       const preview = engineRef.current.interactions?.getPreview?.() || null;

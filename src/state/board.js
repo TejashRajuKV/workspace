@@ -16,6 +16,8 @@ export const boardRefs = {
   marquee: null, // world-space rect while dragging
   changedIds: new Set(), // object ids whose bounds changed → quadtree sync
   fullRebuild: false, // quadtree rebuild flag (reconnect/bootstrap)
+  renderTick: 0, // bumped whenever non-object visuals change (presence,
+  // remote selections, restores) → the render loop repaints
 };
 
 let bound = false;
@@ -372,6 +374,7 @@ export function bindBoardSocket() {
       });
       if (rec.selection?.length) boardRefs.remoteSelections.set(sid, rec.selection);
     }
+    boardRefs.renderTick += 1; // remote cursors/selections → repaint
     useBoard.setState({ peerCount: Math.max(0, count - (me ? 1 : 0)) });
   });
 

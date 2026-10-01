@@ -135,7 +135,9 @@ export function submitDocOp(io, socket, room, documentId, opComponents, baseRev)
     return { rev: newRev, op: op.toJSON() };
   } catch (err) {
     console.error("[doc] submit failed:", err.message);
-    return { error: "Apply failed: " + err.message };
+    // an apply failure implies the client's base is inconsistent with the
+    // stored history — flag stale so the client resyncs instead of retrying
+    return { error: "Apply failed: " + err.message, stale: true };
   }
 }
 

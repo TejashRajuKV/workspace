@@ -152,8 +152,10 @@ export default function Toolbar() {
 
   return (
     <>
-      {/* tool rail */}
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 rounded-xl bg-white shadow-xl border border-slate-200 p-1">
+      {/* tool rail — anchored inside the board area (not vertically centered:
+          with 13 buttons it is taller than short viewports and would spill
+          over the top bar and terminal) */}
+      <div className="absolute left-3 top-3 bottom-3 z-20 flex flex-col gap-0.5 rounded-xl bg-white shadow-xl border border-slate-200 p-1 overflow-y-auto">
         {TOOLS.map(({ id, icon: Icon, label }) => (
           <button
             key={id}

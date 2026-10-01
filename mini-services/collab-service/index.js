@@ -194,7 +194,14 @@ io.on("connection", (socket) => {
         .prepare(
           "SELECT id, path, is_folder, content, doc_version FROM documents WHERE workspace_id = ? AND deleted = 0 ORDER BY path"
         )
-        .all(workspaceId);
+        .all(workspaceId)
+        .map((r) => ({
+          id: r.id,
+          path: r.path,
+          isFolder: !!r.is_folder,
+          content: r.is_folder ? "" : r.content,
+          docVersion: r.doc_version,
+        }));
       const memberRows = db
         .prepare(
           `SELECT m.user_id, m.role FROM workspace_members m WHERE m.workspace_id = ?`

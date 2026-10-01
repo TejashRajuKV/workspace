@@ -91,7 +91,10 @@ export function validateCanvasOp(raw) {
       if (!obj || typeof obj !== "object" || typeof obj.id !== "string")
         return { ok: false, error: "bad object" };
       if (!OBJECT_TYPES.includes(obj.type)) return { ok: false, error: "bad type" };
-      const norm = normalizeObjectPayload(obj);
+      // obj = { id, type, z, payload: {x,y,w,h,rot,style,data} } — normalization
+      // expects the flat payload (plus type for data-shape handling). Passing the
+      // nested object here silently reset every CREATE to x:0,y:0,w:100,h:100.
+      const norm = normalizeObjectPayload({ type: obj.type, ...(obj.payload || {}) });
       if (!norm) return { ok: false, error: "bad payload" };
       const size = JSON.stringify(norm).length;
       if (size > LIMITS.MAX_PAYLOAD_JSON) return { ok: false, error: "payload too large" };

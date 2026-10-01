@@ -8,7 +8,7 @@ import { useSession } from "@/state/session";
 import { useBoard } from "@/state/board";
 import { useCode } from "@/state/code";
 import { getSocket, onLocal } from "@/lib/socket";
-import { bindBoardSocket } from "@/state/board";
+import { bindBoardSocket, boardRefs } from "@/state/board";
 import AuthView from "@/components/workspace/AuthView";
 import DashboardView from "@/components/workspace/DashboardView";
 import WorkspaceView from "@/components/workspace/WorkspaceView";
@@ -22,9 +22,8 @@ export default function Page() {
     bindBoardSocket();
     // e2e/debug hooks
     try {
-      window.__iwStores = { session: useSession, board: useBoard, code: useCode };
+      window.__iwStores = { session: useSession, board: useBoard, code: useCode, refs: boardRefs };
     } catch {}
-
 
     let alive = true;
     fetch("/api/auth/session")
@@ -38,6 +37,10 @@ export default function Page() {
             const s = getSocket();
             if (s.disconnected) s.connect();
           } catch {}
+          // deep link: /?w=<workspaceId> restores the workspace after a
+          // reload instead of dumping the user back on the dashboard
+          const wid = new URLSearchParams(window.location.search).get("w");
+          if (wid) openWorkspace(wid);
         } else {
           useSession.setState({ view: "auth" });
         }
@@ -46,6 +49,7 @@ export default function Page() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setUser]);
 
   const openWorkspace = async (workspaceId) => {
@@ -65,6 +69,12 @@ export default function Page() {
     }
     const bootstrap = await res.json();
     useSession.getState().openWorkspace(workspaceId, bootstrap);
+    // reflect the open workspace in the URL so a reload restores it
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("w", workspaceId);
+      window.history.replaceState(null, "", url);
+    } catch {}
   };
 
   if (view === "loading") {

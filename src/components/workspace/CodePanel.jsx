@@ -173,13 +173,25 @@ export default function CodePanel({ onRunFile }) {
       if (!docId) return;
       const state = useCode.getState().getDocState(docId);
       if (!state) return;
+      // Build ONE TextOperation over the PRE-EVENT document. evt.changes
+      // offsets are all relative to that document — submitting them as
+      // sequential ops corrupts every change after the first (the earlier
+      // ops shift the offsets). Monaco guarantees non-overlapping, ordered
+      // changes, so a single walk composes them exactly.
+      const preLen = evt.changes.reduce(
+        (len, ch) => len - ch.text.length + ch.rangeLength,
+        model.getValueLength()
+      );
+      const op = new TextOperation();
+      let prevEnd = 0;
       for (const change of evt.changes) {
-        const op = new TextOperation();
-        op.retain(change.rangeOffset);
+        op.retain(change.rangeOffset - prevEnd);
         if (change.rangeLength) op.delete(change.rangeLength);
         if (change.text) op.insert(change.text);
-        useCode.getState().submitLocal(docId, op);
+        prevEnd = change.rangeOffset + change.rangeLength;
       }
+      op.retain(preLen - prevEnd);
+      if (!op.isNoop()) useCode.getState().submitLocal(docId, op);
     });
 
     // cursor presence inside the editor
@@ -237,6 +249,17 @@ export default function CodePanel({ onRunFile }) {
     const doc = st.docs.find((d) => d.id === st.activeDocId);
     if (!doc) return;
     let model = modelsRef.current.get(doc.id);
+    // @monaco-editor/react disposes models when the editor unmounts (e.g. the
+    // last tab closes after a file delete/rename). A cached disposed model
+    // throws "Model is disposed!" on access — replace it instead of reusing.
+    if (model) {
+      try {
+        model.getValue();
+      } catch {
+        modelsRef.current.delete(doc.id);
+        model = null;
+      }
+    }
     if (!model) {
       model = monaco.editor.createModel(doc.content, languageOf(doc.path));
       modelsRef.current.set(doc.id, model);
@@ -278,7 +301,13 @@ export default function CodePanel({ onRunFile }) {
       }
     };
     window.addEventListener("iw-doc-reset", handler);
-    return () => window.removeEventListener("iw-doc-reset", handler);
+    // after a reconnect/stall recovery the OT state may include remote ops
+    // the model never saw — re-sync it from the authoritative state
+    window.addEventListener("iw-doc-recovered", handler);
+    return () => {
+      window.removeEventListener("iw-doc-reset", handler);
+      window.removeEventListener("iw-doc-recovered", handler);
+    };
   }, []);
 
   // (per-user label styles are injected by the presence:state handler)

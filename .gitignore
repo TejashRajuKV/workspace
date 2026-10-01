@@ -58,3 +58,5 @@ server.log
 *.db-journal
 *.db-wal
 *.db-shm
+tool-results/
+*.log

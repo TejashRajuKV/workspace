@@ -43,6 +43,130 @@ function logOp(state, op, by) {
   if (state.appliedLog.length > MAX_LOG) state.appliedLog.splice(0, state.appliedLog.length - MAX_LOG);
 }
 
+// ---------------------------------------------------------------------------
+// Reconnect / stall recovery.
+//
+// If an op is outstanding when the socket drops, its ack is lost forever:
+// without recovery every later keystroke queues into `buffer` and the editor
+// silently stops syncing.
+//
+// Recovery: fetch the ops the server applied since our rev (doc:sync), feed
+// them through the normal applyRemote path (which transforms outstanding +
+// buffer correctly), then resolve the outstanding op:
+//   - it landed server-side (our userId shows up in the missed range)
+//       → promote the buffer (never re-send — OT tie-break would duplicate it)
+//   - it never landed → re-send it at the current rev (server transforms it)
+// If the history window was pruned (full reset), fall back to a clean reset.
+// ---------------------------------------------------------------------------
+
+const OUTSTANDING_TIMEOUT_MS = 12000;
+const recoverTimers = new Map(); // docId → timeout
+
+function clearRecoverTimer(docId) {
+  const t = recoverTimers.get(docId);
+  if (t) {
+    clearTimeout(t);
+    recoverTimers.delete(docId);
+  }
+}
+
+function armRecoverTimer(docId) {
+  clearRecoverTimer(docId);
+  recoverTimers.set(
+    docId,
+    setTimeout(() => {
+      recoverTimers.delete(docId);
+      const st = docStates.get(docId);
+      // only recover when an op is actually stuck in flight
+      if (st && st.outstanding) recoverDoc(docId);
+    }, OUTSTANDING_TIMEOUT_MS)
+  );
+}
+
+// Bring a doc with pending (unacked) work back into a consistent pipeline.
+export function recoverDoc(docId) {
+  const state = docStates.get(docId);
+  if (!state) return;
+  if (!state.outstanding && !state.buffer.length) return;
+  clearRecoverTimer(docId);
+  const baseRev = state.rev;
+  getSocket().emit("doc:sync", { documentId: docId, since: baseRev }, (res) => {
+    if (res?.error) return;
+    const st = docStates.get(docId);
+    if (!st) return;
+    if (res.reset) {
+      // history window pruned — a clean reset is the only safe answer
+      st.content = res.content;
+      st.rev = res.rev;
+      st.outstanding = null;
+      st.buffer = [];
+      st.appliedLog = [];
+      st.undoStack = [];
+      st.redoStack = [];
+      useCode.getState().bumpTick();
+      try {
+        window.dispatchEvent(new CustomEvent("iw-doc-reset", { detail: { docId } }));
+      } catch {}
+      return;
+    }
+    const myId = useBoard.getState().me?.id;
+    let mineLanded = false;
+    for (const entry of res.ops || []) {
+      if (entry.by === myId) {
+        // own echo: the server applied OUR op (e.g. socket.io flushed the
+        // buffered emit on reconnect). Our optimistic content already
+        // includes its effect — applying the echo again would duplicate it
+        // (insert×insert tie-break keeps both copies). Collapse the
+        // outstanding op into a pure retain so later transforms chain from
+        // the post-echo base; buffered ops were typed on top of our op, so
+        // their base already matches the server's.
+        mineLanded = true;
+        if (st.outstanding) {
+          const noop = new TextOperation();
+          noop.retain(st.outstanding.targetLength);
+          st.outstanding = noop;
+        }
+        st.rev = entry.rev; // keep the sequential-rev chain intact
+        continue;
+      }
+      useCode.getState().applyRemote(docId, entry.op, entry.rev, entry.by);
+      if (docStates.get(docId) !== st) return; // doc was reset underneath us
+    }
+    st.rev = res.rev; // adopt the true server rev (own echoes were skipped)
+    const flushNext = () => {
+      if (st.buffer.length) {
+        let composed = st.buffer[0];
+        for (let i = 1; i < st.buffer.length; i++) composed = composed.compose(st.buffer[i]);
+        st.buffer = [];
+        sendOutstanding(docId, st, composed);
+      } else {
+        st.outstanding = null;
+      }
+      useCode.getState().bumpTick();
+    };
+    if (st.outstanding) {
+      if (mineLanded) {
+        // our original op is part of the server history — never re-send it
+        flushNext();
+      } else {
+        // the op never landed — re-air it at the current rev
+        sendOutstanding(docId, st, st.outstanding);
+      }
+    } else if (st.buffer.length) {
+      flushNext();
+    }
+    try {
+      window.dispatchEvent(new CustomEvent("iw-doc-recovered", { detail: { docId } }));
+    } catch {}
+  });
+}
+
+export function recoverAllDocs() {
+  for (const [docId, st] of docStates) {
+    if (st.outstanding || st.buffer.length) recoverDoc(docId);
+  }
+}
+
 export const useCode = create((set, get) => ({
   docs: [], // [{ id, path, isFolder, content, docVersion }]
   openTabs: [], // [docId]
@@ -71,15 +195,17 @@ export const useCode = create((set, get) => ({
     if (doc && !docStates.has(docId)) {
       getState(docId, doc.content, doc.docVersion);
     }
-    // fetch authoritative state (in case another client edited before us)
+    // fetch authoritative state (in case another client edited before us).
+    // Adopt content AND rev whenever there is no pending local work — the
+    // pipeline is worthless if rev drifts from the server (every op would be
+    // rejected as a base-length mismatch).
     getSocket().emit("doc:open", { documentId: docId }, (res) => {
       if (res?.error) return;
-      const st = get();
-      const state = getState(docId, res.content, res.rev);
-      if (state.content !== res.content && !state.outstanding && !state.buffer.length) {
+      const state = getState(docId);
+      if (!state.outstanding && !state.buffer.length) {
         state.content = res.content;
         state.rev = res.rev;
-        st.bumpTick();
+        get().bumpTick();
       }
     });
   },
@@ -124,8 +250,8 @@ export const useCode = create((set, get) => ({
   applyRemote(docId, opComponents, rev, by) {
     const state = getState(docId);
     if (rev !== state.rev + 1) {
-      // gap → resync this document
-      resyncDoc(docId);
+      // gap → recover (fetch canonical content, replay unsent local work)
+      recoverDoc(docId);
       return;
     }
     let remote;
@@ -159,7 +285,7 @@ export const useCode = create((set, get) => ({
       get().bumpTick();
       return remote; // caller applies this exact op to the Monaco model
     } catch (err) {
-      resyncDoc(docId);
+      recoverDoc(docId);
       return null;
     }
   },
@@ -247,14 +373,18 @@ function useRoleCheck() {
 function sendOutstanding(docId, state, op) {
   state.outstanding = op;
   const baseRev = state.rev;
+  armRecoverTimer(docId);
   getSocket().emit(
     "doc:op",
     { documentId: docId, op: op.toJSON(), rev: baseRev },
     (res) => {
+      clearRecoverTimer(docId);
       if (res?.error) {
-        if (res.stale) resyncDoc(docId);
-        // on other errors: drop outstanding (state reconciles via resync)
-        state.outstanding = null;
+        if (res.stale) recoverDoc(docId);
+        else {
+          // other errors: the op's fate is unknown — recover via diff
+          recoverDoc(docId);
+        }
         return;
       }
       useCode.getState().ack(docId, res.rev);
@@ -280,6 +410,9 @@ function commitLocalOp(docId, state, op) {
 }
 
 export function resyncDoc(docId) {
+  // Full reset for a doc (used when pending work should be dropped, e.g. the
+  // document was reset by a peer). For reconnect/stall recovery prefer
+  // recoverDoc — it preserves unsent local edits via diff replay.
   getSocket().emit("doc:sync", { documentId: docId, since: -1 }, (res) => {
     if (res?.error) return;
     const state = getState(docId);
@@ -329,4 +462,21 @@ export function bindDocSocket() {
     }
   });
   on("doc:ack", () => {}); // acks arrive via emit callbacks
+
+  // After a reconnect, any in-flight op's ack was lost — recover every doc
+  // with pending work (re-airs unsent edits; see recoverDoc above).
+  //
+  // Delay: socket.io flushes its emit buffer AFTER 'connect' handlers run,
+  // so an immediately-issued doc:sync can reach the server BEFORE the
+  // buffered doc:op — the sync then reports "nothing missed", the op gets
+  // re-aired, and the tie-break duplicates it. Waiting one tick lets the
+  // flushed op land first so the sync sees it as an own echo.
+  getSocket().on("connect", () => {
+    setTimeout(() => recoverAllDocs(), 150);
+  });
+  // offline → online transitions from the board store also deserve a sweep
+  // (covers the case where the socket reconnected before this module bound).
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", () => recoverAllDocs());
+  }
 }
