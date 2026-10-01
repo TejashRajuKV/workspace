@@ -39,3 +39,18 @@ Work Log:
 Stage Summary:
 - Repo fully staged for push on main (3 commits: initial, project, cleanup).
 - Pending: user must supply a GitHub Personal Access Token (repo scope) to authenticate the push.
+
+---
+Task ID: 2 (completion)
+Agent: main (Super Z)
+Task: Push to GitHub — completed
+
+Work Log:
+- Fine-grained PAT path failed (token locked to read-only scope, "Resource not accessible by personal access token").
+- Started device-login flow as fallback; user instead provided a classic PAT (ghp_...) with repo scope.
+- Pushed main → origin/main via one-time credential helper (token NOT persisted in config/remote/refs).
+- Cleaned up device-flow temp files; verified remote: main is up, tracking set.
+
+Stage Summary:
+- Live repo: https://github.com/TejashRajuKV/workspace (main, 3 commits, 240 files).
+- Tokens used in chat should be revoked by user for hygiene.
