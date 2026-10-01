@@ -1,0 +1,139 @@
+// Real-Time Collaborative Infinite Workspace — database schema
+//
+// Ownership split:
+//   - Next.js API routes (Prisma): users, sessions, workspaces, workspace_members, documents (CRUD)
+//   - Collaboration mini-service (node:sqlite raw SQL): canvas_objects, operations,
+//     document_operations, snapshots, workspace_state  (hot operation path)
+//   Both share the same SQLite file in WAL mode.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  color        String   @default("#10b981")
+  createdAt    BigInt   @default(0) @map("created_at")
+
+  @@map("users")
+}
+
+model Session {
+  id        String @id // random 64-hex token
+  userId    String @map("user_id")
+  expiresAt BigInt @map("expires_at")
+  createdAt BigInt @default(0) @map("created_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Workspace {
+  id          String @id @default(cuid())
+  name        String
+  description String @default("")
+  ownerId     String @map("owner_id")
+  createdAt   BigInt @default(0) @map("created_at")
+  updatedAt   BigInt @default(0) @map("updated_at")
+
+  @@index([ownerId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  userId      String @map("user_id")
+  role        String @default("editor") // owner | editor | viewer
+  joinedAt    BigInt @default(0) @map("joined_at")
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+// Materialized current canvas state (owned by collab service).
+model CanvasObject {
+  id             String  @id
+  workspaceId    String  @map("workspace_id")
+  type           String
+  payload        String // JSON: { x, y, w, h, rot, style, data }
+  zIndex         Int     @default(0) @map("z_index")
+  createdBy      String  @default("") @map("created_by")
+  createdAt      BigInt  @default(0) @map("created_at")
+  updatedAt      BigInt  @default(0) @map("updated_at")
+  updatedVersion Int     @default(0) @map("updated_version")
+  deleted        Boolean @default(false)
+
+  @@index([workspaceId, deleted])
+  @@map("canvas_objects")
+}
+
+// Append-only operation log (event sourcing). `version` is per-workspace seq.
+model Operation {
+  id          Int    @id @default(autoincrement())
+  workspaceId String @map("workspace_id")
+  userId      String @map("user_id")
+  type        String
+  objectId    String @default("") @map("object_id")
+  payload     String
+  version     Int
+  clientId    String @default("") @map("client_id")
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId, id])
+  @@map("operations")
+}
+
+// Virtual file system of the code workspace (CRUD via Next.js REST).
+model Document {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  path        String // e.g. "src/app.js", folders end with "/"
+  isFolder    Boolean @default(false) @map("is_folder")
+  content     String  @default("")
+  docVersion  Int     @default(0) @map("doc_version")
+  createdBy   String  @default("") @map("created_by")
+  createdAt   BigInt @default(0) @map("created_at")
+  updatedAt   BigInt @default(0) @map("updated_at")
+  deleted     Boolean @default(false)
+
+  @@unique([workspaceId, path])
+  @@index([workspaceId])
+  @@map("documents")
+}
+
+// Per-document OT operation log (owned by collab service).
+model DocumentOperation {
+  id          Int    @id @default(autoincrement())
+  workspaceId String @map("workspace_id")
+  documentId  String @map("document_id")
+  userId      String @map("user_id")
+  op          String // JSON TextOperation
+  baseRev     Int    @map("base_rev")
+  version     Int // doc revision after applying
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([documentId, version])
+  @@map("document_operations")
+}
+
+// Periodic full-state snapshots (owned by collab service).
+model Snapshot {
+  id          Int    @id @default(autoincrement())
+  workspaceId String @map("workspace_id")
+  version     Int
+  state       String // JSON: { objects: [...], docs: { docId: content } }
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([workspaceId, version])
+  @@map("snapshots")
+}

@@ -1,0 +1,14 @@
+{
+  "name": "collab-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-time collaboration service: canvas sync, document OT, presence, execution",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  }
+}
