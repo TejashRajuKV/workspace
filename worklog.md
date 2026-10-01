@@ -54,3 +54,26 @@ Work Log:
 Stage Summary:
 - Live repo: https://github.com/TejashRajuKV/workspace (main, 3 commits, 240 files).
 - Tokens used in chat should be revoked by user for hygiene.
+
+---
+Task ID: 3
+Agent: main (Super Z)
+Task: Full-site inspection ("inspect the whole website, some things are not working properly")
+
+Work Log:
+- Verified services (Next :3000 via gateway :81, collab :3003) and core tests (18/18).
+- Key discovery: must test through the Caddy gateway (:81) — sockets route via ?XTransformPort; direct :3000 testing is invalid for realtime.
+- Found + fixed 7 bugs via browser E2E + SQLite ground-truth checks + socket instrumentation:
+  1. CREATE canvas ops lost geometry (nested payload vs flat normalization) — shapes always spawned at (0,0,100,100).
+  2. Renderer never applied camera transform — pan/zoom didn't move/scale objects; selection overlay authored for world space.
+  3. Render loop only repainted on local drags — joined objects, remote ops, pan/zoom, remote cursors all stale until interaction.
+  4. Doc OT state started at rev=0 (ws:join snake_case doc_version + doc:open not adopting rev) — all edits rejected with transform mismatch.
+  5. Multi-change Monaco events (paste/IME) submitted per-change ops with stale offsets — corruption.
+  6. No reconnect recovery: outstanding op during socket drop deadlocked the editor silently; recovery added (sync + transform + own-echo dedup + re-air/promote + 12s watchdog); fixed echo race with socket.io buffer flush (150ms delay) verified by offline-typing test converging exactly.
+  7. Account switch kept old socket identity (role/permissions/attribution) — forced re-handshake on user change.
+- Also: tool rail overflow fix, /?w= deep-link restore, error boundary, disposed-model crash fix, regression test for CREATE geometry.
+- E2E verified: deep link, draw (geometry persisted), pan/zoom, selection overlay, two isolated browser sessions (presence cursors with labels, live remote ops), typing sync (rev adopt + 53→89 op flow), offline edit + service kill/restart recovery (exact convergence, marker once), terminal exec (exit 1 with stderr + exit 0 clean), history panel.
+
+Stage Summary:
+- Commit 675d8a9 pushed after verification; 18/18 tests green.
+- Note: two tabs in one browser share the session cookie — second-user tests must use `agent-browser --session`.
