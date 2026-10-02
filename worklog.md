@@ -100,3 +100,19 @@ Work Log:
 Stage Summary:
 - Commit c60e131 on main; 25/25 tests, stress pass, two-session E2E pass.
 - Realtime + persistence now consistent: log ↔ materialized rows ↔ clients converge after restore/undo/reload.
+
+---
+Task ID: 5
+Agent: main (Super Z)
+Task: Push inspection fixes to GitHub with fresh token + final health verification
+
+Work Log:
+- User supplied new classic PAT after old tokens were flagged for revocation.
+- Verified token identity (TejashRajuKV) and repo push permission via API.
+- Pushed 3 pending commits (675d8a9..75dcac1: 7-bug fix pass, 4-bug fix pass, worklogs) → remote main = 75dcac1, ls-remote confirmed.
+- Final health check: 25/25 tests pass; gateway :81 serves app (title OK); /api/auth/session OK; socket via gateway correctly rejects anonymous ("unauthorized") and accepts authenticated session cookie (connected OK).
+- Note: auth contract is { mode: "register" | "login" } (an earlier smoke script using "action" was a script bug, not an app bug).
+
+Stage Summary:
+- GitHub main up to date at 75dcac1; all inspection fixes live on remote.
+- Local + remote state fully in sync; suite green; realtime chain verified end-to-end.
