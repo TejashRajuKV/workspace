@@ -77,3 +77,26 @@ Work Log:
 Stage Summary:
 - Commit 675d8a9 pushed after verification; 18/18 tests green.
 - Note: two tabs in one browser share the session cookie — second-user tests must use `agent-browser --session`.
+
+---
+Task ID: 4
+Agent: main (Super Z)
+Task: Second full-site inspection pass ("continue") — deeper hunt for remaining defects
+
+Work Log:
+- Baseline: services healthy through gateway :81, 18/18 tests green.
+- E2E re-verified all 11 canvas tools (ellipse/line/arrow/freehand/text/sticky/connector/eraser verified individually), style bar (fill/stroke/width-on-mouseup), duplicate, z-order, undo/redo of erase, hand pan, zoom buttons, text/sticky dblclick editing (blur or Ctrl+Enter commits; Escape cancels), file create/open, Monaco editing, python+node execution (stdout/stderr/exit 3), terminal ls/help/file-not-found, deep-link restore after reload.
+- Found + fixed 4 more bugs (commit c60e131):
+  1. CRITICAL canvas CREATE used INSERT OR IGNORE — no-op on soft-deleted rows. Undo-of-erase never persisted server-side (object vanished after reload = data loss) and restore's DELETE+CREATE pairs left objects dead; client/server diverged. Fixed with ON CONFLICT upsert that clears deleted and preserves original created_by/created_at. Verified E2E: erase→undo→reload now keeps the object; restore-to-v24 converges client ↔ server ↔ post-reload.
+  2. validateFilePath rejected folder paths ("src/") — every UI "New folder" POST 400'd ("invalid path segment"); folder creation was completely broken. Fixed by validating segments without the (legal) trailing slash. Verified: src/ folder row created and tree renders it.
+  3. PATCH rename/move lacked POST's ensure-parents loop — renaming into "lib/helpers.py" left an orphan row. Fixed with the same parent-creation loop. Verified: rename creates lib/ implicitly.
+  4. HistoryPanel summaries showed "moved (undefined, undefined)"/"rotated NaN°" — API returns `payload`, opSummary reads `p`. Normalized at load. Verified: "moved (50, 50)".
+  5. (cosmetic) Terminal now shows ✓ exit 0 in sys color, ✗ exit N in red.
+- Added regression tests: tests/create-resurrect.test.js (4), tests/vfs-path.test.js (3) — suite now 25/25.
+- Two-session collab sanity after fixes: peer2 registers, joins by ID, sees objects + peer count, draws → session 1 receives op v34 live.
+- Stress re-run: 1000 ops, exact convergence, p99 46ms — STRESS PASS.
+- Noted (not fixed, functional): native prompt()/confirm()/alert() dialogs used for file naming, restore/delete confirmations, join-error feedback — work in normal browsers but blocking; candidates for an in-app modal/toast polish pass.
+
+Stage Summary:
+- Commit c60e131 on main; 25/25 tests, stress pass, two-session E2E pass.
+- Realtime + persistence now consistent: log ↔ materialized rows ↔ clients converge after restore/undo/reload.
