@@ -15,7 +15,10 @@ export default function HistoryPanel({ workspaceId, onClose }) {
     const res = await fetch(`/api/workspaces/${workspaceId}/versions?limit=120`);
     if (res.ok) {
       const data = await res.json();
-      setOps(data.operations || []);
+      // the API names the op payload "payload"; opSummary expects "p" —
+      // normalize once so summaries like "moved (dx, dy)" render values
+      // instead of "moved (undefined, undefined)".
+      setOps((data.operations || []).map((o) => ({ ...o, p: o.payload })));
     }
   };
 

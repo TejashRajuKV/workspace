@@ -44,7 +44,8 @@ export default function Terminal({ workspaceId }) {
       runIdRef.current = null;
       if (error) push("err", `error: ${error}`);
       else if (timedOut) push("err", `✗ terminated (timeout, ${durationMs}ms)`);
-      else push("sys", `✗ exit ${exitCode} · ${durationMs}ms`);
+      else if (exitCode === 0) push("sys", `✓ exit 0 · ${durationMs}ms`);
+      else push("err", `✗ exit ${exitCode} · ${durationMs}ms`);
     });
     return () => {
       offStarted();

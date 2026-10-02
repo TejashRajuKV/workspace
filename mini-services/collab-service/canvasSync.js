@@ -45,17 +45,30 @@ function applyToRow(op, workspaceId, userId, version, now) {
   switch (type) {
     case OP.CREATE: {
       const obj = p.object;
+      // Upsert, not INSERT OR IGNORE: a CREATE may legally target an id whose
+      // row still exists but is soft-deleted (undo of an eraser delete, or the
+      // DELETE+CREATE pair a restore emits). INSERT OR IGNORE silently no-oped
+      // there, leaving the materialized row dead while the op log said it
+      // exists — clients then diverged from the server after reload.
+      // On conflict keep the original created_by/created_at (historical truth).
       db.prepare(
-        `INSERT OR IGNORE INTO canvas_objects
+        `INSERT INTO canvas_objects
          (id, workspace_id, type, payload, z_index, created_by, created_at, updated_at, updated_version, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+         ON CONFLICT(id) DO UPDATE SET
+           type = excluded.type,
+           payload = excluded.payload,
+           z_index = excluded.z_index,
+           deleted = 0,
+           updated_at = excluded.updated_at,
+           updated_version = excluded.updated_version`
       ).run(
         oid,
         workspaceId,
         obj.type,
         JSON.stringify(obj.payload),
         obj.z || 0,
-        userId,
+        obj.createdBy || userId,
         now,
         now,
         version

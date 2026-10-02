@@ -49,6 +49,30 @@ export async function PATCH(req, { params }) {
     data: { path: newPath, updatedAt: BigInt(now) },
   });
 
+  // ensure parent folders of the new path exist (same as POST) — without this
+  // a rename into "lib/helpers.py" leaves an orphan row with no "lib/" folder,
+  // which the tree builder then can't place
+  const parts = newPath.split("/");
+  parts.pop();
+  let prefix = "";
+  for (const part of parts) {
+    prefix = prefix ? `${prefix}/${part}` : part;
+    const parent = await db.document.findUnique({
+      where: { workspaceId_path: { workspaceId: id, path: prefix + "/" } },
+    });
+    if (!parent) {
+      await db.document.create({
+        data: {
+          workspaceId: id,
+          path: prefix + "/",
+          isFolder: true,
+          createdAt: BigInt(now),
+          updatedAt: BigInt(now),
+        },
+      });
+    }
+  }
+
   serviceClient.notifyFsChanged(id, "renamed").catch(() => {});
   return NextResponse.json({ ok: true });
 }

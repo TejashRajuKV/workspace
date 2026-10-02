@@ -246,11 +246,16 @@ export function newObjectId() {
 
 // Validate a virtual-file-system path (shared by REST API + execution).
 // Returns null when valid, otherwise an error message.
+// Folders are stored with a trailing slash ("src/"), so exactly one trailing
+// slash is legal — validate the segments without it. (Before this fix every
+// UI "New folder" request 400'd: "src/".split("/") yields a trailing "".)
 export function validateFilePath(path) {
   if (typeof path !== "string" || !path) return "path required";
   if (path.length > LIMITS.MAX_PATH) return "path too long";
   if (path.includes("\\")) return "invalid path";
-  const parts = path.split("/");
+  const core = path.endsWith("/") ? path.slice(0, -1) : path;
+  if (!core) return "invalid path segment";
+  const parts = core.split("/");
   if (parts.some((p) => !p || p === "." || p === "..")) return "invalid path segment";
   if (parts.length > 12) return "too deep";
   if (/[\u0000-\u001f<>:"|?*]/.test(path)) return "invalid characters";
