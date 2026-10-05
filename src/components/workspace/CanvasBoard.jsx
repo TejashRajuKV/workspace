@@ -138,6 +138,9 @@ export default function CanvasBoard() {
     el.style.width = `${Math.max(w * s.camera.zoom, 40)}px`;
     el.style.height = `${Math.max(h * s.camera.zoom, 28)}px`;
     el.style.fontSize = `${fontSize * s.camera.zoom}px`;
+    // autoFocus fires while the element is still display:none, so focus here
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
   }, [editor]);
 
   const commitEditor = (commit) => {

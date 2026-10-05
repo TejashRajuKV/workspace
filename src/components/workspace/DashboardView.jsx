@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, LogOut, Users } from "lucide-react";
+import { Plus, Trash2, LogOut, Copy } from "lucide-react";
 import { InfiniteBoard } from "./InfiniteBoardLogo";
 import { useSession } from "@/state/session";
+import { confirmDialog, toast } from "./Feedback";
 
 export default function DashboardView({ onOpen }) {
   const user = useSession((s) => s.user);
@@ -14,16 +15,29 @@ export default function DashboardView({ onOpen }) {
   const [joinId, setJoinId] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [loadError, setLoadError] = useState(false);
+
   const load = async () => {
-    const res = await fetch("/api/workspaces");
-    if (res.ok) {
+    try {
+      const res = await fetch("/api/workspaces");
+      if (!res.ok) throw new Error(String(res.status));
       const data = await res.json();
       setWorkspaces(data.workspaces || []);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     }
   };
 
   useEffect(() => {
-    load();
+    let alive = true;
+    fetch("/api/workspaces")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => alive && setWorkspaces(data.workspaces || []))
+      .catch(() => alive && setLoadError(true));
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const create = async (e) => {
@@ -41,7 +55,9 @@ export default function DashboardView({ onOpen }) {
         setName("");
         setCreating(false);
         onOpen(data.workspace.id);
-      }
+      } else toast(data.error || "Could not create workspace", "error");
+    } catch {
+      toast("Network error — could not create workspace", "error");
     } finally {
       setBusy(false);
     }
@@ -53,8 +69,15 @@ export default function DashboardView({ onOpen }) {
   };
 
   const remove = async (ws) => {
-    if (!confirm(`Delete workspace "${ws.name}"? This cannot be undone.`)) return;
-    await fetch(`/api/workspaces/${ws.id}`, { method: "DELETE" });
+    const ok = await confirmDialog({
+      title: `Delete "${ws.name}"?`,
+      message: "The board, files and history are permanently removed for everyone. This cannot be undone.",
+      confirmLabel: "Delete workspace",
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/workspaces/${ws.id}`, { method: "DELETE" });
+    if (!res.ok) toast("Could not delete workspace", "error");
     load();
   };
 
@@ -118,7 +141,7 @@ export default function DashboardView({ onOpen }) {
         <form onSubmit={join} className="mb-6 flex gap-2 items-center flex-wrap">
           <span className="text-xs text-[#8b94a7]">Join by ID:</span>
           <input
-            className="field w-64 py-1.5 text-xs"
+            className="field !w-64 max-w-full py-1.5 text-xs"
             placeholder="paste a workspace id"
             value={joinId}
             onChange={(e) => setJoinId(e.target.value)}
@@ -128,7 +151,15 @@ export default function DashboardView({ onOpen }) {
           </button>
         </form>
 
-        {!workspaces && <div className="text-sm text-[#8b94a7]">Loading…</div>}
+        {!workspaces && !loadError && <div className="text-sm text-[#8b94a7]">Loading…</div>}
+        {!workspaces && loadError && (
+          <div className="rounded-xl border border-red-900/60 bg-red-950/20 p-6 text-center">
+            <p className="text-sm text-red-300">Couldn't load your workspaces.</p>
+            <button className="btn btn-outline px-3 py-1.5 mt-3 text-xs" onClick={load}>
+              Retry
+            </button>
+          </div>
+        )}
         {workspaces && workspaces.length === 0 && (
           <div className="rounded-xl border border-dashed border-[#232b3b] p-10 text-center">
             <p className="text-sm text-[#8b94a7]">No workspaces yet.</p>
@@ -137,16 +168,24 @@ export default function DashboardView({ onOpen }) {
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           {workspaces?.map((ws) => (
-            <button
+            <div
               key={ws.id}
-              className="text-left rounded-xl border border-[#232b3b] bg-[#10141d] hover:border-emerald-600/50 transition-colors p-4 group"
+              role="link"
+              tabIndex={0}
+              className="text-left cursor-pointer rounded-xl border border-[#232b3b] bg-[#10141d] hover:border-emerald-600/50 hover:bg-[#121722] focus-visible:border-emerald-500 outline-none transition-colors p-4"
               onClick={() => onOpen(ws.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpen(ws.id);
+                }
+              }}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-[#e6e9ef] truncate">{ws.name}</h3>
                   <p className="text-[11px] text-[#5b6478] mt-0.5">
-                    {new Date(ws.updatedAt).toLocaleString()}
+                    Updated {new Date(ws.updatedAt).toLocaleString()}
                   </p>
                 </div>
                 <span
@@ -159,22 +198,41 @@ export default function DashboardView({ onOpen }) {
                   {ws.role}
                 </span>
               </div>
-              <div className="flex items-center justify-between mt-3">
-                <code className="text-[10px] text-[#5b6478] truncate max-w-56">{ws.id}</code>
-                {ws.role === "owner" && (
-                  <span
-                    role="button"
-                    className="p-1 rounded text-[#5b6478] hover:text-red-400 hover:bg-red-500/10"
+              <div className="flex items-center justify-between mt-3 gap-2">
+                <code className="text-[10px] text-[#5b6478] truncate">{ws.id}</code>
+                <div className="flex items-center gap-0.5 flex-none">
+                  <button
+                    type="button"
+                    title="Copy workspace ID"
+                    aria-label="Copy workspace ID"
+                    className="p-1 rounded text-[#5b6478] hover:text-emerald-400 hover:bg-emerald-500/10"
                     onClick={(e) => {
                       e.stopPropagation();
-                      remove(ws);
+                      navigator.clipboard
+                        ?.writeText(ws.id)
+                        .then(() => toast("Workspace ID copied — share it to collaborate", "success", 2500))
+                        .catch(() => toast("Couldn't copy — select the ID manually", "error"));
                     }}
                   >
-                    <Trash2 size={13} />
-                  </span>
-                )}
+                    <Copy size={13} />
+                  </button>
+                  {ws.role === "owner" && (
+                    <button
+                      type="button"
+                      title="Delete workspace"
+                      aria-label="Delete workspace"
+                      className="p-1 rounded text-[#5b6478] hover:text-red-400 hover:bg-red-500/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(ws);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </main>

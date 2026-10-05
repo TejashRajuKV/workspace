@@ -105,6 +105,10 @@ export const USER_COLORS = [
   "#a855f7",
 ];
 
-export function pickColor() {
-  return USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
+// Prefer the least-used palette colors so collaborators are visually distinct
+// (a pure random pick regularly gave two people in one room the same color).
+export function pickColor(usage = {}) {
+  const min = Math.min(...USER_COLORS.map((c) => usage[c] || 0));
+  const pool = USER_COLORS.filter((c) => (usage[c] || 0) === min);
+  return pool[Math.floor(Math.random() * pool.length)];
 }

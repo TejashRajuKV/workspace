@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useRef } from "react";
 import { useBoard } from "@/state/board";
+import { toast } from "./Feedback";
 import { OP, newObjectId } from "@/shared/protocol";
 import { makeStyle } from "@/shared/canvasOps";
 import { buildHistoryEntry } from "./canvas-engine/history";
@@ -118,7 +119,7 @@ export default function Toolbar() {
     reader.onload = () => {
       const s = useBoard.getState();
       if (String(reader.result).length > 600 * 1024) {
-        alert("Image too large (max ~450KB after encoding)");
+        toast("Image too large (max ~450KB after encoding)", "error");
         return;
       }
       const img = new Image();
@@ -182,7 +183,8 @@ export default function Toolbar() {
       </div>
 
       {/* style bar */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-xl bg-white shadow-xl border border-slate-200 px-2 py-1.5 flex-wrap max-w-[92%]">
+      <div className="absolute top-3 left-[4.25rem] right-3 z-20 flex justify-center pointer-events-none">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-xl bg-white shadow-xl border border-slate-200 px-2 py-1.5 [&>*]:flex-none flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible justify-start md:justify-center max-w-full">
         <button title="Undo (Ctrl+Z)" disabled={!canEdit} onClick={undo} className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30">
           <Undo2 size={16} />
         </button>
@@ -199,7 +201,7 @@ export default function Toolbar() {
               setStyle({ fill: c });
               if (hasSelection) submitStyleToSelection({ fill: c === "transparent" ? "#ffffff" : c });
             }}
-            className={`w-6 h-6 rounded-md border-2 ${style.fill === c ? "border-emerald-500" : "border-slate-200"} ${
+            className={`w-5 h-5 flex-none rounded-md border-2 ${style.fill === c ? "border-emerald-500" : "border-slate-200"} ${
               c === "transparent" ? "checker" : ""
             } disabled:opacity-40`}
             style={c === "transparent" ? {} : { background: c }}
@@ -215,7 +217,7 @@ export default function Toolbar() {
               setStyle({ stroke: c });
               if (hasSelection) submitStyleToSelection({ stroke: c });
             }}
-            className={`w-6 h-6 rounded-md border-2 ${style.stroke === c ? "border-emerald-500" : "border-slate-200"} disabled:opacity-40`}
+            className={`w-5 h-5 flex-none rounded-full border-2 ${style.stroke === c ? "border-emerald-500" : "border-slate-200"} disabled:opacity-40`}
             style={{ background: c }}
           />
         ))}
@@ -260,6 +262,7 @@ export default function Toolbar() {
         <button title="Delete (Del)" disabled={!hasSelection} onClick={deleteSelection} className="w-8 h-8 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-30">
           <Trash2 size={16} />
         </button>
+      </div>
       </div>
     </>
   );

@@ -17,6 +17,7 @@ import FileExplorer from "./FileExplorer";
 import CodePanel from "./CodePanel";
 import Terminal from "./Terminal";
 import HistoryPanel from "./HistoryPanel";
+import { toast } from "./Feedback";
 
 export default function WorkspaceView() {
   const workspaceId = useSession((s) => s.workspaceId);
@@ -27,7 +28,6 @@ export default function WorkspaceView() {
   const [showTerminal, setShowTerminal] = useState(true);
   const [codeWidth, setCodeWidth] = useState(460);
   const [mobileTab, setMobileTab] = useState("board"); // board | code | terminal
-  const [toast, setToast] = useState(null);
   const dragRef = useRef(null);
   const joinedRef = useRef(false);
 
@@ -50,7 +50,7 @@ export default function WorkspaceView() {
       useCode.getState().setDocs(bootstrap.docs || []);
       emitAck("ws:join", { workspaceId }, 12000).then((res) => {
         if (res.error) {
-          alert("Could not join workspace: " + res.error);
+          toast("Could not join workspace: " + res.error, "error");
           closeWorkspace();
           return;
         }
@@ -71,18 +71,15 @@ export default function WorkspaceView() {
     });
 
     const offRestored = on("ws:restored", ({ toVersion, by }) => {
-      setToast(`Board restored to v${toVersion} by ${by}`);
-      setTimeout(() => setToast(null), 4000);
+      toast(`Board restored to v${toVersion} by ${by}`, "success");
     });
 
     const offReset = (evt) => {
-      setToast("A document was reset by resync — unsent local edits could not be merged.");
-      setTimeout(() => setToast(null), 5000);
+      toast("A document was reset by resync — unsent local edits could not be merged.", "error", 6000);
     };
     window.addEventListener("iw-doc-reset", offReset);
     const offToast = (evt) => {
-      setToast(evt.detail?.msg || "");
-      setTimeout(() => setToast(null), 3500);
+      toast(evt.detail?.msg || "");
     };
     window.addEventListener("iw-toast", offToast);
 
@@ -208,11 +205,6 @@ export default function WorkspaceView() {
         ))}
       </nav>
 
-      {toast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[#161b26] border border-[#232b3b] text-sm text-[#e6e9ef] shadow-xl">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
