@@ -6,14 +6,15 @@
 import { useEffect, useState } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { opSummary } from "@/shared/protocol";
+import { confirmDialog, toast } from "./Feedback";
 
 export default function HistoryPanel({ workspaceId, onClose }) {
   const [ops, setOps] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const res = await fetch(`/api/workspaces/${workspaceId}/versions?limit=120`);
-    if (res.ok) {
+    const res = await fetch(`/api/workspaces/${workspaceId}/versions?limit=120`).catch(() => null);
+    if (res?.ok) {
       const data = await res.json();
       // the API names the op payload "payload"; opSummary expects "p" —
       // normalize once so summaries like "moved (dx, dy)" render values
@@ -22,13 +23,26 @@ export default function HistoryPanel({ workspaceId, onClose }) {
     }
   };
 
+  const [loadError, setLoadError] = useState(false);
+
   useEffect(() => {
-    load();
+    let alive = true;
+    fetch(`/api/workspaces/${workspaceId}/versions?limit=120`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => alive && setOps((data.operations || []).map((o) => ({ ...o, p: o.payload }))))
+      .catch(() => alive && setLoadError(true));
+    return () => {
+      alive = false;
+    };
   }, [workspaceId]);
 
   const restore = async (version) => {
-    if (!confirm(`Restore the board to version ${version}?\nCurrent state is kept in the operation log (this is itself undoable per user).`))
-      return;
+    const ok = await confirmDialog({
+      title: `Restore board to version ${version}?`,
+      message: "The current state stays in the operation log, and the restore is itself a synchronized edit everyone sees.",
+      confirmLabel: "Restore",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/restore`, {
@@ -37,7 +51,7 @@ export default function HistoryPanel({ workspaceId, onClose }) {
         body: JSON.stringify({ version }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) alert(data.error || "Restore failed");
+      if (!res.ok) toast(data.error || "Restore failed", "error");
       else load();
     } finally {
       setBusy(false);
@@ -63,7 +77,8 @@ export default function HistoryPanel({ workspaceId, onClose }) {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-        {!ops && <div className="text-xs text-[#8b94a7] px-2">Loading…</div>}
+        {!ops && !loadError && <div className="text-xs text-[#8b94a7] px-2">Loading…</div>}
+        {!ops && loadError && <div className="text-xs text-red-400 px-2">Couldn't load history.</div>}
         {ops && ops.length === 0 && (
           <div className="text-xs text-[#8b94a7] px-2 py-3 leading-relaxed">
             No operations yet — draw something on the board.

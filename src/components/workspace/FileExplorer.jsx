@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useCode } from "@/state/code";
 import { useBoard } from "@/state/board";
+import { toast, confirmDialog, promptDialog } from "./Feedback";
 
 function buildTree(docs) {
   const root = { name: "", path: "", children: [], isFolder: true, doc: null };
@@ -88,7 +89,7 @@ export default function FileExplorer({ workspaceId, onOpenFile }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast(String(data.error || `HTTP ${res.status}`));
+        toast(String(data.error || `HTTP ${res.status}`), "error");
         return null;
       }
       return data;
@@ -107,7 +108,12 @@ export default function FileExplorer({ workspaceId, onOpenFile }) {
   };
 
   const createFile = async (parentPath, isFolder) => {
-    const name = prompt(isFolder ? "New folder name:" : "New file name (e.g. main.js):");
+    const name = await promptDialog({
+      title: isFolder ? "New folder" : "New file",
+      message: parentPath ? `Inside ${parentPath}` : undefined,
+      placeholder: isFolder ? "src" : "main.js",
+      confirmLabel: "Create",
+    });
     if (!name) return;
     const path = (parentPath || "") + name + (isFolder ? "/" : "");
     const ok = await api("POST", `/api/workspaces/${workspaceId}/files`, {
@@ -115,11 +121,20 @@ export default function FileExplorer({ workspaceId, onOpenFile }) {
       isFolder,
       content: "",
     });
-    if (ok) refreshDocs();
+    if (ok) {
+      await refreshDocs();
+      // open what you just made so you can type straight away
+      if (!isFolder && ok.doc?.id) openDoc(ok.doc.id);
+    }
   };
 
   const rename = async (doc) => {
-    const newName = prompt("Rename to:", doc.path);
+    const newName = await promptDialog({
+      title: "Rename / move",
+      message: "Edit the full path to move it into another folder.",
+      defaultValue: doc.path,
+      confirmLabel: "Rename",
+    });
     if (!newName || newName === doc.path) return;
     const ok = await api("PATCH", `/api/workspaces/${workspaceId}/files/${doc.id}`, {
       path: newName,
@@ -128,7 +143,13 @@ export default function FileExplorer({ workspaceId, onOpenFile }) {
   };
 
   const remove = async (doc) => {
-    if (!confirm(`Delete "${doc.path}"?`)) return;
+    const confirmed = await confirmDialog({
+      title: `Delete ${doc.isFolder ? "folder" : "file"}?`,
+      message: doc.path,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!confirmed) return;
     const ok = await api("DELETE", `/api/workspaces/${workspaceId}/files/${doc.id}`);
     if (ok) refreshDocs();
   };
@@ -274,8 +295,3 @@ export default function FileExplorer({ workspaceId, onOpenFile }) {
   );
 }
 
-function toast(msg) {
-  try {
-    window.dispatchEvent(new CustomEvent("iw-toast", { detail: { msg } }));
-  } catch {}
-}

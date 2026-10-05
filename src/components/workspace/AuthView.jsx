@@ -44,16 +44,19 @@ export default function AuthView({ onAuthed }) {
           </div>
         </div>
 
-        <form onSubmit={submit} className="rounded-xl border border-[#232b3b] bg-[#10141d] p-5 space-y-3.5">
+        <form onSubmit={submit} aria-busy={busy} className="rounded-xl border border-[#232b3b] bg-[#10141d] p-5 space-y-3.5">
           <div className="flex rounded-lg bg-[#0b0e14] p-1 text-xs font-medium">
             {["login", "register"].map((m) => (
               <button
                 type="button"
                 key={m}
                 className={`flex-1 py-1.5 rounded-md transition-colors ${
-                  mode === m ? "bg-emerald-600 text-white" : "text-[#8b94a7] hover:text-white"
+                  mode === m ? "bg-[#1b2230] text-white shadow-sm ring-1 ring-[#2a3347]" : "text-[#8b94a7] hover:text-white"
                 }`}
-                onClick={() => setMode(m)}
+                onClick={() => {
+                  setMode(m);
+                  setError(null);
+                }}
               >
                 {m === "login" ? "Sign in" : "Create account"}
               </button>

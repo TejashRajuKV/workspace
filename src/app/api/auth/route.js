@@ -36,7 +36,7 @@ export async function POST(req) {
       data: {
         username,
         passwordHash: hashPassword(password),
-        color: pickColor(),
+        color: pickColor(await colorUsage()),
         createdAt: BigInt(Date.now()),
       },
     });
@@ -54,4 +54,9 @@ export async function POST(req) {
   const res = NextResponse.json({ user: publicUser(user) });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
+}
+
+async function colorUsage() {
+  const rows = await db.user.groupBy({ by: ["color"], _count: { color: true } });
+  return Object.fromEntries(rows.map((r) => [r.color, r._count.color]));
 }

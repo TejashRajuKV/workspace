@@ -14,6 +14,7 @@ export default function TopBar({ onToggleHistory }) {
   const members = useBoard((s) => s.members);
   const me = useBoard((s) => s.me);
   const peerCount = useBoard((s) => s.peerCount);
+  const onlineUsers = useBoard((s) => s.onlineUsers);
   const connection = useBoard((s) => s.connection);
   const lastVersion = useBoard((s) => s.lastVersion);
   const workspaceId = useBoard((s) => s.wsId);
@@ -32,7 +33,15 @@ export default function TopBar({ onToggleHistory }) {
     setTimeout(() => setRunning(false), 1200);
   };
 
-  const avatarStack = members.slice(0, 6);
+  // everyone who belongs to the workspace, plus anyone present who joined
+  // after we opened it (bootstrap members are a snapshot); offline dimmed
+  const onlineIds = new Set(onlineUsers.map((u) => u.id));
+  const everyone = [...members];
+  for (const u of onlineUsers) {
+    if (!everyone.some((m) => m.user.id === u.id)) everyone.push({ user: u, role: "editor" });
+  }
+  everyone.sort((a, b) => Number(onlineIds.has(b.user.id)) - Number(onlineIds.has(a.user.id)));
+  const avatarStack = everyone.slice(0, 6);
 
   return (
     <header className="h-12 flex items-center gap-2 px-3 border-b border-[#232b3b] bg-[#0b0e14] flex-none">
@@ -49,7 +58,7 @@ export default function TopBar({ onToggleHistory }) {
         <ArrowLeft size={17} />
       </button>
       <div className="min-w-0">
-        <h1 className="text-sm font-semibold truncate max-w-48 text-[#e6e9ef]">
+        <h1 className="text-sm font-semibold truncate max-w-28 sm:max-w-48 text-[#e6e9ef]">
           {bootstrap?.workspace?.name || "Workspace"}
         </h1>
       </div>
@@ -95,7 +104,7 @@ export default function TopBar({ onToggleHistory }) {
         <History size={15} /> <span className="hidden lg:inline text-xs">History</span>
       </button>
 
-      <div className="flex items-center gap-1.5 pl-1" title={`${peerCount} peer(s) online`}>
+      <div className="flex items-center gap-1.5 pl-1" title={`${peerCount} other${peerCount === 1 ? "" : "s"} online`}>
         <Users size={14} className="text-[#8b94a7]" />
         <div className="flex -space-x-1.5">
           {avatarStack.map((m) => {
@@ -103,17 +112,17 @@ export default function TopBar({ onToggleHistory }) {
             return (
               <span
                 key={m.user.id}
-                title={`${m.user.username}${isMe ? " (you)" : ""} · ${m.role}`}
-                className="w-6.5 h-6.5 w-6 h-6 rounded-full border-2 border-[#0b0e14] flex items-center justify-center text-[10px] font-bold text-white"
-                style={{ background: m.user.color, opacity: isMe ? 1 : 0.9 }}
+                title={`${m.user.username}${isMe ? " (you)" : ""} · ${m.role}${isMe || onlineIds.has(m.user.id) ? "" : " · offline"}`}
+                className="w-6 h-6 rounded-full border-2 border-[#0b0e14] flex items-center justify-center text-[10px] font-bold text-white"
+                style={{ background: m.user.color, opacity: isMe || onlineIds.has(m.user.id) ? 1 : 0.35 }}
               >
                 {m.user.username.slice(0, 2).toUpperCase()}
               </span>
             );
           })}
-          {members.length > 6 && (
+          {everyone.length > 6 && (
             <span className="w-6 h-6 rounded-full border-2 border-[#0b0e14] bg-[#1b2230] text-[9px] text-[#8b94a7] flex items-center justify-center">
-              +{members.length - 6}
+              +{everyone.length - 6}
             </span>
           )}
         </div>

@@ -100,7 +100,8 @@ export default function CodePanel({ onRunFile }) {
       if (!model || docId !== useCode.getState().activeDocId) return;
       applyingRef.current = true;
       try {
-        applyTextOpToModel(monacoRef.current, model, TextOperation.fromJSON(op));
+        // applyRemote hands back a ready TextOperation (JSON only on legacy paths)
+        applyTextOpToModel(monacoRef.current, model, op instanceof TextOperation ? op : TextOperation.fromJSON(op));
       } catch {}
       applyingRef.current = false;
       updateRemoteCursors();
@@ -317,7 +318,7 @@ export default function CodePanel({ onRunFile }) {
       {/* tabs */}
       <div className="flex items-stretch border-b border-[#232b3b] overflow-x-auto flex-none">
         {openTabs.length === 0 && (
-          <div className="px-3 py-2 text-xs text-[#8b94a7]">No files open</div>
+          <div className="px-3 py-2 text-xs text-[#5b6478]">No tabs open</div>
         )}
         {openTabs.map((id) => {
           const doc = docs.find((d) => d.id === id);
@@ -367,8 +368,9 @@ export default function CodePanel({ onRunFile }) {
             onMount={handleEditorMount}
           />
         ) : (
-          <div className="h-full flex items-center justify-center text-sm text-[#8b94a7]">
-            Open a file from the explorer to start editing
+          <div className="h-full flex flex-col items-center justify-center gap-1 px-6 text-center">
+            <span className="text-sm text-[#cbd2e0]">No file open</span>
+            <span className="text-xs text-[#5b6478]">Pick a file from the explorer, or create one with the + buttons.</span>
           </div>
         )}
       </div>

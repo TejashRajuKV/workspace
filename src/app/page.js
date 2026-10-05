@@ -12,10 +12,43 @@ import { bindBoardSocket, boardRefs } from "@/state/board";
 import AuthView from "@/components/workspace/AuthView";
 import DashboardView from "@/components/workspace/DashboardView";
 import WorkspaceView from "@/components/workspace/WorkspaceView";
+import FeedbackHost, { toast } from "@/components/workspace/Feedback";
 
 export default function Page() {
   const view = useSession((s) => s.view);
   const setUser = useSession((s) => s.setUser);
+
+  const openWorkspace = async (workspaceId) => {
+    // make sure the realtime socket is live (it may have been rejected
+    // before login — socket.io does not always retry after auth failures)
+    try {
+      const s = getSocket();
+      if (s.disconnected) s.connect();
+    } catch {}
+    // join by ID first (idempotent — creators keep their owner role)
+    await fetch(`/api/workspaces/${workspaceId}/join`, { method: "POST" }).catch(() => {});
+    const res = await fetch(`/api/workspaces/${workspaceId}/bootstrap`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast(data.error || "Could not open workspace", "error");
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("w")) {
+          url.searchParams.delete("w");
+          window.history.replaceState(null, "", url);
+        }
+      } catch {}
+      return;
+    }
+    const bootstrap = await res.json();
+    useSession.getState().openWorkspace(workspaceId, bootstrap);
+    // reflect the open workspace in the URL so a reload restores it
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("w", workspaceId);
+      window.history.replaceState(null, "", url);
+    } catch {}
+  };
 
   useEffect(() => {
     // bind the realtime layer once
@@ -49,42 +82,23 @@ export default function Page() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setUser]);
 
-  const openWorkspace = async (workspaceId) => {
-    // make sure the realtime socket is live (it may have been rejected
-    // before login — socket.io does not always retry after auth failures)
-    try {
-      const s = getSocket();
-      if (s.disconnected) s.connect();
-    } catch {}
-    // join by ID first (idempotent — creators keep their owner role)
-    await fetch(`/api/workspaces/${workspaceId}/join`, { method: "POST" }).catch(() => {});
-    const res = await fetch(`/api/workspaces/${workspaceId}/bootstrap`);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error || "Could not open workspace");
-      return;
-    }
-    const bootstrap = await res.json();
-    useSession.getState().openWorkspace(workspaceId, bootstrap);
-    // reflect the open workspace in the URL so a reload restores it
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.set("w", workspaceId);
-      window.history.replaceState(null, "", url);
-    } catch {}
-  };
-
+  let body;
   if (view === "loading") {
-    return (
+    body = (
       <div className="min-h-screen flex items-center justify-center bg-[#0b0e14] text-[#8b94a7] text-sm">
         Loading…
       </div>
     );
-  }
-  if (view === "auth") return <AuthView onAuthed={(user) => setUser(user)} />;
-  if (view === "workspace") return <WorkspaceView />;
-  return <DashboardView onOpen={openWorkspace} />;
+  } else if (view === "auth") body = <AuthView onAuthed={(user) => setUser(user)} />;
+  else if (view === "workspace") body = <WorkspaceView />;
+  else body = <DashboardView onOpen={openWorkspace} />;
+
+  return (
+    <>
+      {body}
+      <FeedbackHost />
+    </>
+  );
 }

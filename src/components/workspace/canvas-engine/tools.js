@@ -533,7 +533,7 @@ export function createInteractions(canvas, engine) {
             w: Math.max(tiny ? 180 : w, 60),
             h: Math.max(tiny ? 180 : h, 60),
             rot: 0,
-            style: makeStyle({ ...s.style, fill: s.style.fill === "transparent" ? "#fde047" : s.style.fill, color: "#3f3f1f", fontSize: 14, align: "left" }),
+            style: makeStyle({ ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#dbe4f0" ? "#fde047" : s.style.fill, color: "#3f3f1f", fontSize: 14, align: "left" }),
             data: { text: "" },
           };
           const op = { type: OP.CREATE, oid: id, p: { object: { id, type: "sticky", payload, z: nextZ() } } };
@@ -619,9 +619,19 @@ export function createInteractions(canvas, engine) {
   }
 
   // ---------- keyboard ----------
+  // Monaco's input surface is a plain <div class="native-edit-context"> (the
+  // EditContext API), not a textarea/contenteditable — so check for the
+  // editor container too, otherwise Space / letter shortcuts / Ctrl+Z typed
+  // into the code editor are hijacked by the board.
+  function isTypingTarget(target) {
+    if (!target) return false;
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return true;
+    return !!target.closest?.(".monaco-editor, [contenteditable], [role=dialog]");
+  }
+
   function onKeyDown(e) {
     const target = e.target;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (isTypingTarget(target)) return;
     const s = store();
     if (e.code === "Space") {
       spaceHeld = true;
@@ -787,7 +797,7 @@ export function createInteractions(canvas, engine) {
           w: Math.max(Math.abs(b.x - a.x), 2),
           h: Math.max(Math.abs(b.y - a.y), 2),
           rot: 0,
-          style: makeStyle(tool === "sticky" ? { ...s.style, fill: "#fde047" } : s.style),
+          style: makeStyle(tool === "sticky" ? { ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#dbe4f0" ? "#fde047" : s.style.fill } : s.style),
           data: tool === "sticky" ? { text: "" } : {},
         },
       };

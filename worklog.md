@@ -116,3 +116,20 @@ Work Log:
 Stage Summary:
 - GitHub main up to date at 75dcac1; all inspection fixes live on remote.
 - Local + remote state fully in sync; suite green; realtime chain verified end-to-end.
+
+---
+Task ID: 6
+Agent: Claude (debug + UI pass)
+Task: Full debug pass, fix issues, polish UI
+
+Fixed:
+1. CRITICAL: remote edits never reached an open Monaco editor — CodePanel called TextOperation.fromJSON() on the TextOperation instance applyRemote already returns (TypeError swallowed). Peers only saw each other's code after reopening the file.
+2. CRITICAL: spaces (and letter shortcuts / Ctrl+Z) typed in the code editor were hijacked by the board's global keydown handler — Monaco's input is a <div class="native-edit-context">, not a textarea. Handler now ignores targets inside .monaco-editor / contenteditable / dialogs.
+3. Inline sticky/text editor never got focus (autoFocus on a display:none textarea) so typed text was lost and blur-commit never fired.
+4. Sticky notes finished with the default blue fill while the drag preview was yellow.
+5. Presence avatars: members who joined after you opened the workspace were missing; offline members now dimmed, online users merged in.
+6. User colors were random (two collaborators often identical) — now least-used palette color.
+7. Dashboard: load failures stuck on "Loading…", create errors swallowed, nested <button> inside <button>; deep-link ?w= no longer sticks after a failed open.
+
+UI: in-app confirm/prompt dialogs + toasts replace native alert/confirm/prompt (Feedback.jsx); copy-workspace-ID button; favicon (src/app/icon.svg); new files auto-open; style bar no longer overlaps the tool rail and scrolls on mobile; clearer empty states; auth tab styling.
+Lint (next/react-hooks) is clean; 25/25 tests pass; two-user E2E converges.

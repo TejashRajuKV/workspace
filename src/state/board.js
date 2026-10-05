@@ -48,6 +48,7 @@ export const useBoard = create((set, get) => ({
   objectCountTick: 0,
   historyTick: 0,
   peerCount: 0,
+  onlineUsers: [], // users currently present in the room (from presence:state)
 
   // ---------------- lifecycle ----------------
   reset() {
@@ -65,6 +66,7 @@ export const useBoard = create((set, get) => ({
       pending: [],
       history: { undo: [], redo: [] },
       peerCount: 0,
+      onlineUsers: [],
       connection: "connecting",
     });
   },
@@ -360,9 +362,11 @@ export function bindBoardSocket() {
     boardRefs.cursors.clear();
     boardRefs.remoteSelections.clear();
     let count = 0;
+    const online = new Map(); // userId → user (deduped across tabs)
     for (const rec of Object.values(users)) {
       if (!rec?.user) continue;
       count++;
+      online.set(rec.user.id, rec.user);
       if (me && rec.user.id === me.id) continue;
       const sid = rec.user.id;
       boardRefs.cursors.set(sid, {
@@ -375,7 +379,7 @@ export function bindBoardSocket() {
       if (rec.selection?.length) boardRefs.remoteSelections.set(sid, rec.selection);
     }
     boardRefs.renderTick += 1; // remote cursors/selections → repaint
-    useBoard.setState({ peerCount: Math.max(0, count - (me ? 1 : 0)) });
+    useBoard.setState({ peerCount: Math.max(0, count - (me ? 1 : 0)), onlineUsers: [...online.values()] });
   });
 
   on("ws:restored", ({ toVersion, by }) => {
