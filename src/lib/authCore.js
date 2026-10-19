@@ -51,22 +51,8 @@ export function sessionCookieOptions() {
   };
 }
 
-export async function getAuthUser(req) {
-  // Express/Node adapters can pass the raw request; existing Next.js routes
-  // keep using the framework cookie store with no behavior change.
-  if (req?.headers) {
-    const header = typeof req.headers.get === "function"
-      ? req.headers.get("cookie")
-      : req.headers.cookie;
-    const token = getCookieValue(header, SESSION_COOKIE);
-    return token ? getAuthUserByToken(token) : null;
-  }
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  return getAuthUserByToken(token);
-}
-
+// Returns { user, session } or null. Identity is ALWAYS derived from the
+// session cookie — never from anything the client sends in the body.
 export async function getAuthUserByToken(token) {
   if (!token || typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) return null;
   const session = await db.session.findUnique({ where: { id: token } });
