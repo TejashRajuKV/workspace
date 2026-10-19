@@ -1,0 +1,50 @@
+name: Quality checks
+
+on:
+  push:
+    branches: [main, deploy-readiness-2026-10-19]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install main dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+        env:
+          DATABASE_URL: file:${{ github.workspace }}/db/ci.db
+
+      - name: Install collaboration service dependencies
+        working-directory: mini-services/collab-service
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Unit and regression tests
+        run: bun run check:tests
+
+      - name: Production build
+        run: bun run build
+        env:
+          DATABASE_URL: file:${{ github.workspace }}/db/ci.db
+          DATABASE_PATH: ${{ github.workspace }}/db/ci.db
+          INTERNAL_TOKEN: ci-only-token-012345678901234567890123456789

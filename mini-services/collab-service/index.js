@@ -38,9 +38,13 @@ import {
 import { startExecution } from "./execution.js";
 import { LIMITS, opSummary } from "../../src/shared/protocol.js";
 
-const PORT = 3003;
-const INTERNAL_PORT = 3004; // localhost-only, for the Next.js server
-const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || "iw-internal-token";
+const PORT = Number(process.env.PORT || 3003);
+const INTERNAL_PORT = Number(process.env.INTERNAL_PORT || 3004); // localhost-only, for the Next.js server
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || (process.env.NODE_ENV === "production" ? "" : "iw-internal-token");
+
+if (process.env.NODE_ENV === "production" && INTERNAL_TOKEN.length < 32) {
+  throw new Error("Production requires INTERNAL_TOKEN to be set to a random value of at least 32 characters.");
+}
 
 const httpServer = createServer((req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
@@ -107,7 +111,8 @@ async function handleInternal(req, body) {
 const io = new Server(httpServer, {
   // DO NOT change the path — the gateway forwards exactly this path.
   path: "/",
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  // Same-origin gateway deployment; configure explicit origins only if a separate frontend is required.
+  cors: { origin: process.env.SOCKET_CORS_ORIGIN || false, methods: ["GET", "POST"] },
   pingTimeout: 60000,
   pingInterval: 25000,
   maxHttpBufferSize: 1e6,
@@ -356,7 +361,7 @@ httpServer.listen(PORT, () => {
   console.log(`[collab-service] listening on :${PORT} (socket.io path "/")`);
 });
 
-internalServer.listen(INTERNAL_PORT, "127.0.0.1", () => {
+internalServer.listen(INTERNAL_PORT, process.env.INTERNAL_HOST || "127.0.0.1", () => {
   console.log(`[collab-service] internal endpoints on 127.0.0.1:${INTERNAL_PORT}`);
 });
 

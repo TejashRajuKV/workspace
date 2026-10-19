@@ -21,11 +21,11 @@ export async function requireAuth() {
 // Returns { user, role } or a NextResponse error (check instanceof Response).
 export async function requireMember(workspaceId, needEdit = false) {
   const auth = await getAuthUser();
-  if (!auth) return { error: fail("Not authenticated", 401) };
+  if (!auth) return fail("Not authenticated", 401);
   const role = await getRole(workspaceId, auth.user.id);
-  if (!role) return { error: fail("Workspace not found or not a member", 404) };
+  if (!role) return fail("Workspace not found or not a member", 404);
   if (needEdit && role === "viewer")
-    return { error: fail("Viewers cannot modify this workspace", 403) };
+    return fail("Viewers cannot modify this workspace", 403);
   return { user: auth.user, role };
 }
 
