@@ -70,6 +70,14 @@ export async function PATCH(req, { params }) {
           updatedAt: BigInt(now),
         },
       });
+    } else if (parent.deleted) {
+      // Reusing a path beneath a previously deleted folder must restore the
+      // parent too; otherwise the child exists in the DB but is invisible in
+      // bootstrap's deleted=false tree.
+      await db.document.update({
+        where: { id: parent.id },
+        data: { deleted: false, isFolder: true, content: "", updatedAt: BigInt(now) },
+      });
     }
   }
 
