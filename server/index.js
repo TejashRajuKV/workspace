@@ -122,6 +122,122 @@ async function handleSession(req, res) {
   });
 }
 
+
+async function requestAuth(req) {
+  const token = getCookieValue(req.headers.cookie, SESSION_COOKIE);
+  return token ? getAuthUserByToken(token) : null;
+}
+
+async function handleWorkspaces(req, res) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+
+  if (req.method === "GET") {
+    const memberships = await db.workspaceMember.findMany({ where: { userId: auth.user.id } });
+    const ids = memberships.map((membership) => membership.workspaceId);
+    const workspaces = await db.workspace.findMany({
+      where: { id: { in: ids } },
+      orderBy: { updatedAt: "desc" },
+    });
+    const owners = await db.user.findMany({
+      where: { id: { in: workspaces.map((workspace) => workspace.ownerId) } },
+    });
+    const ownerMap = Object.fromEntries(owners.map((owner) => [owner.id, publicUser(owner)]));
+    const roleMap = Object.fromEntries(memberships.map((membership) => [membership.workspaceId, membership.role]));
+    return sendJson(res, 200, {
+      workspaces: workspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name,
+        description: workspace.description,
+        ownerId: workspace.ownerId,
+        owner: ownerMap[workspace.ownerId] || null,
+        role: roleMap[workspace.id] || "viewer",
+        createdAt: Number(workspace.createdAt),
+        updatedAt: Number(workspace.updatedAt),
+      })),
+    });
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, error.status || 400, { error: error.message });
+  }
+  const name = String(body?.name || "").trim();
+  if (!name || name.length > 120) return sendJson(res, 400, { error: "Name must be 1-120 characters" });
+  const description = String(body?.description || "").slice(0, 500);
+  const now = Date.now();
+  const workspace = await db.workspace.create({
+    data: { name, description, ownerId: auth.user.id, createdAt: BigInt(now), updatedAt: BigInt(now) },
+  });
+  await db.workspaceMember.create({
+    data: { workspaceId: workspace.id, userId: auth.user.id, role: "owner", joinedAt: BigInt(now) },
+  });
+  return sendJson(res, 201, {
+    workspace: {
+      id: workspace.id,
+      name: workspace.name,
+      description: workspace.description,
+      ownerId: workspace.ownerId,
+      role: "owner",
+      createdAt: Number(workspace.createdAt),
+      updatedAt: Number(workspace.updatedAt),
+    },
+  });
+}
+
+async function handleWorkspaceJoin(req, res, workspaceId) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace) return sendJson(res, 404, { error: "Workspace not found" });
+  const existing = await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: auth.user.id } },
+  });
+  if (existing) return sendJson(res, 200, { ok: true, role: existing.role });
+  const member = await db.workspaceMember.create({
+    data: { workspaceId, userId: auth.user.id, role: "editor", joinedAt: BigInt(Date.now()) },
+  });
+  return sendJson(res, 201, { ok: true, role: member.role });
+}
+
+async function handleWorkspaceBootstrap(req, res, workspaceId) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+  const membership = await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: auth.user.id } },
+  });
+  if (!membership) return sendJson(res, 404, { error: "Workspace not found" });
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace) return sendJson(res, 404, { error: "Workspace not found" });
+  const members = await db.workspaceMember.findMany({ where: { workspaceId } });
+  const users = await db.user.findMany({ where: { id: { in: members.map((member) => member.userId) } } });
+  const userMap = Object.fromEntries(users.map((user) => [user.id, publicUser(user)]));
+  const docs = await db.document.findMany({
+    where: { workspaceId, deleted: false },
+    orderBy: { path: "asc" },
+  });
+  return sendJson(res, 200, {
+    workspace: { id: workspace.id, name: workspace.name, description: workspace.description, ownerId: workspace.ownerId },
+    role: membership.role,
+    me: publicUser(auth.user),
+    members: members.map((member) => ({
+      user: userMap[member.userId] || { id: member.userId, username: "unknown", color: "#888" },
+      role: member.role,
+    })),
+    docs: docs.map((doc) => ({
+      id: doc.id,
+      path: doc.path,
+      isFolder: doc.isFolder,
+      content: doc.isFolder ? "" : doc.content,
+      docVersion: doc.docVersion,
+      createdBy: doc.createdBy,
+      updatedAt: Number(doc.updatedAt),
+    })),
+  });
+}
+
 export function createApiServer() {
   return createServer(async (req, res) => {
     const pathname = new URL(req.url || "/", "http://localhost").pathname;
@@ -134,6 +250,17 @@ export function createApiServer() {
       }
       if (pathname === "/api/auth/session" && (req.method === "GET" || req.method === "DELETE")) {
         return await handleSession(req, res);
+      }
+      if (pathname === "/api/workspaces" && (req.method === "GET" || req.method === "POST")) {
+        return await handleWorkspaces(req, res);
+      }
+      const joinMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/join$/);
+      if (joinMatch && req.method === "POST") {
+        return await handleWorkspaceJoin(req, res, decodeURIComponent(joinMatch[1]));
+      }
+      const bootstrapMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/bootstrap$/);
+      if (bootstrapMatch && req.method === "GET") {
+        return await handleWorkspaceBootstrap(req, res, decodeURIComponent(bootstrapMatch[1]));
       }
       if (pathname.startsWith("/api/")) {
         return sendJson(res, 501, { error: "This API route has not been migrated from Next.js yet." });

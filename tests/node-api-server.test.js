@@ -33,3 +33,11 @@ test("unmigrated API routes explicitly return 501", async () => {
     assert.match((await response.json()).error, /not been migrated/);
   });
 });
+
+test("workspace endpoints enforce authentication before reading workspace data", async () => {
+  await withServer(async (base) => {
+    const response = await fetch(`${base}/api/workspaces`);
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "Not authenticated" });
+  });
+});
