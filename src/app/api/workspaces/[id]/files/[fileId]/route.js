@@ -24,6 +24,13 @@ export async function PATCH(req, { params }) {
   });
   if (!doc) return fail("File not found", 404);
 
+  // A folder cannot be moved into itself or any of its descendants. Doing so
+  // rewrites descendant paths while iterating them and can corrupt the virtual
+  // filesystem tree (for example, moving "src/" to "src/lib/").
+  if (doc.isFolder && newPath.startsWith(doc.path)) {
+    return fail("A folder cannot be moved inside itself", 400);
+  }
+
   const clash = await db.document.findUnique({
     where: { workspaceId_path: { workspaceId: id, path: newPath } },
   });
