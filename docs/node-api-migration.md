@@ -15,10 +15,16 @@ It listens on `PORT` (default `3001`) and binds to `HOST` (default `0.0.0.0`). S
 ## Migrated endpoints
 
 - `GET /healthz` — liveness check.
-- `POST /api/auth` — login or register using JSON `{ "mode": "login" | "register", "username": "...", "password": "..." }`.
-- `GET /api/auth/session` — returns the current session user or `null`.
-- `DELETE /api/auth/session` — destroys the current session and clears its cookie.
+- `POST /api/auth` — login or register with JSON `{ "mode": "login" | "register", "username": "...", "password": "..." }`.
+- `GET /api/auth/session` — current session user or `null`.
+- `DELETE /api/auth/session` — destroy the current session and clear its cookie.
+- `GET /api/workspaces` — list workspaces for the authenticated user.
+- `POST /api/workspaces` — create a workspace and owner membership.
+- `POST /api/workspaces/:id/join` — join a workspace by ID (existing membership is idempotent).
+- `GET /api/workspaces/:id/bootstrap` — return workspace metadata, members, role, and active document tree.
 
-The auth endpoints reuse the existing Prisma database, password hashing, session token format, and `iw_session` cookie, so they are designed to remain compatible with sessions created by the current Next.js server.
+The endpoints reuse existing Prisma models, password hashing, session token format, and the `iw_session` cookie. They are designed to remain compatible with records and sessions created by the current Next.js server.
 
-Other `/api/*` endpoints deliberately return HTTP 501 until migrated. Do not switch the production frontend to this API server until the workspace endpoints, Socket.IO collaboration path, static frontend serving, and deployment checks have also been migrated and tested.
+## Not yet migrated
+
+Workspace file create/rename/delete, restore and version APIs, the Vite frontend, Socket.IO/collaboration integration, and production deployment cutover are still pending. Other `/api/*` endpoints intentionally return HTTP 501 rather than pretending to work. Keep the current Next.js production start command until the remaining endpoints and collaboration flow have been migrated and tested end to end.
