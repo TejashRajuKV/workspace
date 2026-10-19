@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import crypto from "crypto";
 import { db } from "./db";
+import { getCookieValue } from "./sessionCookie.js";
 
 export const SESSION_COOKIE = "iw_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -55,6 +56,15 @@ export function sessionCookieOptions() {
 // Returns { user, session } or null. Identity is ALWAYS derived from the
 // session cookie — never from anything the client sends in the body.
 export async function getAuthUser(req) {
+  // Express/Node adapters can pass the raw request; existing Next.js routes
+  // keep using the framework cookie store with no behavior change.
+  if (req?.headers) {
+    const header = typeof req.headers.get === "function"
+      ? req.headers.get("cookie")
+      : req.headers.cookie;
+    const token = getCookieValue(header, SESSION_COOKIE);
+    return token ? getAuthUserByToken(token) : null;
+  }
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
