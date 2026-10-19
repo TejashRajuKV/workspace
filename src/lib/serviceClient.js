@@ -1,13 +1,14 @@
-// Internal client for talking to the collaboration mini-service
-// (server-to-server, direct to localhost — never exposed to the browser).
-//
-// The service performs: canvas/document operation processing, snapshots,
-// version restore and filesystem-change broadcasts.
+// Internal client for talking to the collaboration mini-service.
+// Server-to-server only: never expose these settings to the browser.
 
 const COLLAB_URL = process.env.COLLAB_SERVICE_URL || "http://127.0.0.1:3004";
-const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || "iw-internal-token";
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || (process.env.NODE_ENV === "production" ? "" : "iw-internal-token");
 
 async function post(path, body, timeoutMs = 8000) {
+  if (!INTERNAL_TOKEN) {
+    return { ok: false, status: 0, data: { error: "INTERNAL_TOKEN must be configured in production" } };
+  }
+
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -31,9 +32,7 @@ async function post(path, body, timeoutMs = 8000) {
 }
 
 export const serviceClient = {
-  notifyFsChanged: (workspaceId, kind) =>
-    post("/internal/fs-changed", { workspaceId, kind }, 3000),
-  restore: (workspaceId, version, byUserId, byName) =>
-    post("/internal/restore", { workspaceId, version, byUserId, byName }, 20000),
+  notifyFsChanged: (workspaceId, kind) => post("/internal/fs-changed", { workspaceId, kind }, 3000),
+  restore: (workspaceId, version, byUserId, byName) => post("/internal/restore", { workspaceId, version, byUserId, byName }, 20000),
   health: () => post("/internal/health", {}, 2000),
 };
