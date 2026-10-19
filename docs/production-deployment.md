@@ -27,6 +27,7 @@ Use the Bun version compatible with the lockfile and the Node version required b
 ```bash
 bun install --frozen-lockfile
 bun run db:generate
+mkdir -p db
 DATABASE_URL=file:$PWD/db/custom.db bun run db:push
 bun run build
 ```
@@ -52,7 +53,7 @@ The exact command syntax for environment variables may differ on Windows or your
 ## Reverse proxy / networking
 
 - Expose the web process (port 3000) to the public internet.
-- Route the Socket.IO query parameter `XTransformPort=3003` to the collaboration service and enable WebSocket upgrades. The included `Caddyfile` shows the intended gateway routing model; adapt it to your host and domain.
+- Route only the Socket.IO query parameter `XTransformPort=3003` to the collaboration service and enable WebSocket upgrades. Never interpolate a client-supplied query parameter into the upstream host/port. The included `Caddyfile` pins this route to port 3003; adapt the listener/domain to your host.
 - Do not expose port 3004. It is an internal loopback-only endpoint.
 - Do not use a serverless/ephemeral filesystem for the SQLite database. This app currently uses one SQLite file shared by both processes.
 
