@@ -39,7 +39,11 @@ function buildTree(docs) {
   const sorted = [...docs].sort((a, b) => a.path.localeCompare(b.path));
   for (const doc of sorted) {
     if (doc.isFolder) {
-      ensureFolder(doc.path);
+      // Preserve the persisted folder document on the tree node. Without this,
+      // folders synthesized from paths have no id, so rename/delete actions
+      // disappear from their context menu.
+      const folder = ensureFolder(doc.path);
+      folder.doc = doc;
     } else {
       const parts = doc.path.split("/");
       const name = parts.pop();
