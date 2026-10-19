@@ -9,7 +9,7 @@ on:
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,8 +23,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: mini-services/collab-service/package.json
 
       - name: Install main dependencies
         run: bun install --frozen-lockfile
@@ -36,7 +34,7 @@ jobs:
 
       - name: Install collaboration service dependencies
         working-directory: mini-services/collab-service
-        run: npm install --ignore-scripts
+        run: bun install --frozen-lockfile
 
       - name: Lint
         run: bun run lint
