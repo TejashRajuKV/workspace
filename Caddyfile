@@ -1,10 +1,9 @@
 :81 {
-	@transform_port_query {
-		query XTransformPort=*
-	}
-
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
+	# Never allow a request query parameter to select an arbitrary upstream port.
+	# Socket.IO from this app uses only XTransformPort=3003.
+	@collab query XTransformPort=3003
+	handle @collab {
+		reverse_proxy localhost:3003 {
 			header_up Host {host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
