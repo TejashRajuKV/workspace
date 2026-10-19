@@ -9,6 +9,7 @@ Prerequisites: Bun, Node.js 22+ (Node 24 recommended for the collaboration servi
 ```bash
 bun install
 bun run db:generate
+mkdir -p db
 DATABASE_URL=file:$PWD/db/custom.db bun run db:push
 ```
 
