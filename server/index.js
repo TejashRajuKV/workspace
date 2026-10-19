@@ -400,11 +400,11 @@ export function createApiServer() {
       if (pathname === "/api/workspaces" && (req.method === "GET" || req.method === "POST")) {
         return await handleWorkspaces(req, res);
       }
-      const filesMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)\\/files$/);
+      const filesMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/files$/);
       if (filesMatch && req.method === "POST") {
         return await handleCreateFile(req, res, decodeURIComponent(filesMatch[1]));
       }
-      const fileMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)\\/files\\/([^/]+)$/);
+      const fileMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/files\/([^/]+)$/);
       if (fileMatch && (req.method === "PATCH" || req.method === "DELETE")) {
         return await handleFileMutation(req, res, decodeURIComponent(fileMatch[1]), decodeURIComponent(fileMatch[2]));
       }
