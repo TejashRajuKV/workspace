@@ -34,8 +34,15 @@ export async function PATCH(req, { params }) {
   const clash = await db.document.findUnique({
     where: { workspaceId_path: { workspaceId: id, path: newPath } },
   });
-  if (clash && !clash.deleted && clash.id !== doc.id)
-    return fail("Target path already exists", 409);
+  if (clash && clash.id !== doc.id) {
+    // The workspace/path pair is unique even for soft-deleted rows. Allowing
+    // a rename onto a deleted path would pass validation and then fail with a
+    // database uniqueness error when updating the current document.
+    return fail(
+      clash.deleted ? "Target path belongs to a deleted item; recreate it or choose another path" : "Target path already exists",
+      409
+    );
+  }
 
   const now = Date.now();
   if (doc.isFolder) {
