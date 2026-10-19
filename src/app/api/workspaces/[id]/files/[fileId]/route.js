@@ -50,6 +50,26 @@ export async function PATCH(req, { params }) {
     const children = await db.document.findMany({
       where: { workspaceId: id, path: { startsWith: doc.path } },
     });
+
+    // Preflight every destination before changing any row. Checking only the
+    // folder's new path misses conflicts such as moving src/ to lib/ when
+    // lib/index.js already exists; the first descendant update would otherwise
+    // hit the unique (workspaceId, path) constraint after earlier rows moved.
+    const movingIds = new Set(children.map((child) => child.id));
+    const targetPaths = new Set(
+      children.map((child) => newPath + child.path.slice(doc.path.length))
+    );
+    const destinationRows = await db.document.findMany({
+      where: { workspaceId: id, path: { startsWith: newPath } },
+      select: { id: true, path: true },
+    });
+    const conflict = destinationRows.find(
+      (row) => targetPaths.has(row.path) && !movingIds.has(row.id)
+    );
+    if (conflict) {
+      return fail("A file or folder already exists at the destination path", 409);
+    }
+
     for (const child of children) {
       const renamed = newPath + child.path.slice(doc.path.length);
       await db.document.update({
