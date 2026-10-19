@@ -22,6 +22,9 @@ It listens on `PORT` (default `3001`) and binds to `HOST` (default `0.0.0.0`). S
 - `POST /api/workspaces` — create a workspace and owner membership.
 - `POST /api/workspaces/:id/join` — join a workspace by ID (existing membership is idempotent).
 - `GET /api/workspaces/:id/bootstrap` — return workspace metadata, members, role, and active document tree.
+- `GET /api/workspaces/:id` — return workspace metadata and membership details.
+- `PATCH /api/workspaces/:id` — update workspace name/description for editors and owners.
+- `DELETE /api/workspaces/:id` — delete a workspace for its owner.
 - `POST /api/workspaces/:id/files` — create or restore a file/folder path, creating missing parent folders.
 - `PATCH /api/workspaces/:id/files/:fileId` — rename/move a file or folder, with descendant-path conflict checks.
 - `DELETE /api/workspaces/:id/files/:fileId` — soft-delete a file or a folder and its descendants.

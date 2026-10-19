@@ -188,6 +188,58 @@ async function handleWorkspaces(req, res) {
   });
 }
 
+
+async function handleWorkspaceById(req, res, workspaceId) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+  const membership = await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: auth.user.id } },
+  });
+  if (!membership) return sendJson(res, 404, { error: "Workspace not found" });
+
+  if (req.method === "GET") {
+    const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
+    if (!workspace) return sendJson(res, 404, { error: "Workspace not found" });
+    const members = await db.workspaceMember.findMany({ where: { workspaceId } });
+    const users = await db.user.findMany({ where: { id: { in: members.map((member) => member.userId) } } });
+    const userMap = Object.fromEntries(users.map((user) => [user.id, publicUser(user)]));
+    return sendJson(res, 200, {
+      workspace: {
+        id: workspace.id, name: workspace.name, description: workspace.description,
+        ownerId: workspace.ownerId, createdAt: Number(workspace.createdAt), updatedAt: Number(workspace.updatedAt),
+      },
+      role: membership.role,
+      members: members.map((member) => ({
+        user: userMap[member.userId] || { id: member.userId, username: "unknown", color: "#888" },
+        role: member.role, joinedAt: Number(member.joinedAt),
+      })),
+    });
+  }
+
+  if (req.method === "PATCH") {
+    if (membership.role === "viewer") return sendJson(res, 403, { error: "Read-only access" });
+    let body;
+    try { body = await readJson(req); }
+    catch (error) { return sendJson(res, error.status || 400, { error: error.message }); }
+    const data = {};
+    if (typeof body?.name === "string" && body.name.trim()) data.name = body.name.trim().slice(0, 120);
+    if (typeof body?.description === "string") data.description = body.description.slice(0, 500);
+    if (!Object.keys(data).length) return sendJson(res, 400, { error: "Nothing to update" });
+    data.updatedAt = BigInt(Date.now());
+    const workspace = await db.workspace.update({ where: { id: workspaceId }, data });
+    return sendJson(res, 200, { workspace: { ...workspace, createdAt: Number(workspace.createdAt), updatedAt: Number(workspace.updatedAt) } });
+  }
+
+  if (req.method === "DELETE") {
+    if (membership.role !== "owner") return sendJson(res, 403, { error: "Only the owner can delete a workspace" });
+    await db.workspaceMember.deleteMany({ where: { workspaceId } });
+    await db.document.deleteMany({ where: { workspaceId } });
+    await db.workspace.delete({ where: { id: workspaceId } });
+    return sendJson(res, 200, { ok: true });
+  }
+  return sendJson(res, 405, { error: "Method not allowed" }, { allow: "GET, PATCH, DELETE" });
+}
+
 async function handleWorkspaceJoin(req, res, workspaceId) {
   const auth = await requestAuth(req);
   if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
@@ -462,6 +514,10 @@ export function createApiServer() {
       const fileMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/files\/([^/]+)$/);
       if (fileMatch && (req.method === "PATCH" || req.method === "DELETE")) {
         return await handleFileMutation(req, res, decodeURIComponent(fileMatch[1]), decodeURIComponent(fileMatch[2]));
+      }
+      const workspaceMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)$/);
+      if (workspaceMatch && ["GET", "PATCH", "DELETE"].includes(req.method)) {
+        return await handleWorkspaceById(req, res, decodeURIComponent(workspaceMatch[1]));
       }
       const joinMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/join$/);
       if (joinMatch && req.method === "POST") {

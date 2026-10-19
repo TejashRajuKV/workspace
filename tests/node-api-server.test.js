@@ -42,6 +42,11 @@ test("workspace endpoints enforce authentication before reading workspace data",
     const response = await fetch(`${base}/api/workspaces`);
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { error: "Not authenticated" });
+    const detail = await fetch(`${base}/api/workspaces/demo`);
+    assert.equal(detail.status, 401);
+    assert.deepEqual(await detail.json(), { error: "Not authenticated" });
+    const patch = await fetch(`${base}/api/workspaces/demo`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "changed" }) });
+    assert.equal(patch.status, 401);
   });
 });
 
