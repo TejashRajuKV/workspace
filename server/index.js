@@ -515,7 +515,7 @@ export function createApiServer() {
       if (fileMatch && (req.method === "PATCH" || req.method === "DELETE")) {
         return await handleFileMutation(req, res, decodeURIComponent(fileMatch[1]), decodeURIComponent(fileMatch[2]));
       }
-      const workspaceMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)$/);
+      const workspaceMatch = pathname.match(/^\/api\/workspaces\/([^/]+)$/);
       if (workspaceMatch && ["GET", "PATCH", "DELETE"].includes(req.method)) {
         return await handleWorkspaceById(req, res, decodeURIComponent(workspaceMatch[1]));
       }
