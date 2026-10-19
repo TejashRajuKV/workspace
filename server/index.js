@@ -12,6 +12,7 @@ import {
 } from "../src/lib/authCore.js";
 import { getCookieValue } from "../src/lib/sessionCookie.js";
 import { clearCookie, serializeCookie } from "../src/lib/httpResponse.js";
+import { serviceClient } from "../src/lib/serviceClient.js";
 
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 3001);
@@ -384,6 +385,52 @@ async function handleFileMutation(req, res, workspaceId, fileId) {
   return sendJson(res, 200, { ok: true });
 }
 
+
+async function handleWorkspaceVersions(req, res, workspaceId) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+  const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId: auth.user.id } } });
+  if (!membership) return sendJson(res, 404, { error: "Workspace not found" });
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace) return sendJson(res, 404, { error: "Workspace not found" });
+  const url = new URL(req.url || "/", "http://localhost");
+  const parsedLimit = Number.parseInt(url.searchParams.get("limit") || "200", 10);
+  const limit = Math.min(Math.max(Number.isFinite(parsedLimit) && parsedLimit ? parsedLimit : 200, 1), 500);
+  const before = Number.parseInt(url.searchParams.get("before") || "", 10);
+  const where = { workspaceId };
+  if (Number.isFinite(before) && before > 0) where.version = { lt: before };
+  const operations = await db.operation.findMany({ where, orderBy: { version: "desc" }, take: limit });
+  const users = await db.user.findMany({ where: { id: { in: [...new Set(operations.map((operation) => operation.userId))] } } });
+  const userMap = Object.fromEntries(users.map((user) => [user.id, publicUser(user)]));
+  return sendJson(res, 200, {
+    operations: operations.map((operation) => ({
+      version: operation.version, type: operation.type, objectId: operation.objectId,
+      payload: JSON.parse(operation.payload || "{}"),
+      user: userMap[operation.userId] || { id: operation.userId, username: "unknown", color: "#888" },
+      createdAt: Number(operation.createdAt),
+    })),
+    hasMore: operations.length === limit,
+  });
+}
+
+async function handleWorkspaceRestore(req, res, workspaceId) {
+  const auth = await requestAuth(req);
+  if (!auth) return sendJson(res, 401, { error: "Not authenticated" });
+  const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId: auth.user.id } } });
+  if (!membership) return sendJson(res, 404, { error: "Workspace not found" });
+  if (membership.role === "viewer") return sendJson(res, 403, { error: "Read-only access" });
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace) return sendJson(res, 404, { error: "Workspace not found" });
+  let body;
+  try { body = await readJson(req); }
+  catch (error) { return sendJson(res, error.status || 400, { error: error.message }); }
+  const version = Number.parseInt(body?.version, 10);
+  if (!Number.isFinite(version) || version < 0) return sendJson(res, 400, { error: "Invalid version" });
+  const result = await serviceClient.restore(workspaceId, version, auth.user.id, auth.user.username);
+  if (!result.ok) return sendJson(res, 502, { error: result.data?.error || "Restore failed (is the collaboration service running?)" });
+  return sendJson(res, 200, result.data);
+}
+
 export function createApiServer() {
   return createServer(async (req, res) => {
     const pathname = new URL(req.url || "/", "http://localhost").pathname;
@@ -399,6 +446,14 @@ export function createApiServer() {
       }
       if (pathname === "/api/workspaces" && (req.method === "GET" || req.method === "POST")) {
         return await handleWorkspaces(req, res);
+      }
+      const versionsMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/versions$/);
+      if (versionsMatch && req.method === "GET") {
+        return await handleWorkspaceVersions(req, res, decodeURIComponent(versionsMatch[1]));
+      }
+      const restoreMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/restore$/);
+      if (restoreMatch && req.method === "POST") {
+        return await handleWorkspaceRestore(req, res, decodeURIComponent(restoreMatch[1]));
       }
       const filesMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/files$/);
       if (filesMatch && req.method === "POST") {

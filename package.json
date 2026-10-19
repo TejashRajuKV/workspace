@@ -13,7 +13,7 @@
     "db:reset": "prisma migrate reset",
     "start:web": "NODE_ENV=production node .next/standalone/server.js",
     "start:collab": "node mini-services/collab-service/index.js",
-    "check:tests": "node --test tests/canvas.test.js tests/create-resurrect.test.js tests/ot.test.js tests/sync.test.js tests/vfs-path.test.js tests/session-cookie.test.js tests/request-auth.test.js tests/http-response.test.js tests/node-api-server.test.js",
+    "check:tests": "node --test tests/*.test.js",
     "check:deployment": "bun run lint && bun run check:tests",
     "start:node": "node server/index.js",
     "dev:node": "node --watch server/index.js"

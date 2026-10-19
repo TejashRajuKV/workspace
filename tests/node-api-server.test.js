@@ -26,11 +26,14 @@ test("Node API health and unknown routes", async () => {
   });
 });
 
-test("unmigrated API routes explicitly return 501", async () => {
+test("version history and restore require authentication", async () => {
   await withServer(async (base) => {
     const response = await fetch(`${base}/api/workspaces/demo/versions`);
-    assert.equal(response.status, 501);
-    assert.match((await response.json()).error, /not been migrated/);
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "Not authenticated" });
+    const restore = await fetch(`${base}/api/workspaces/demo/restore`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 0 }) });
+    assert.equal(restore.status, 401);
+    assert.deepEqual(await restore.json(), { error: "Not authenticated" });
   });
 });
 
