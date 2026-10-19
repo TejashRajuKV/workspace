@@ -22,9 +22,12 @@ It listens on `PORT` (default `3001`) and binds to `HOST` (default `0.0.0.0`). S
 - `POST /api/workspaces` — create a workspace and owner membership.
 - `POST /api/workspaces/:id/join` — join a workspace by ID (existing membership is idempotent).
 - `GET /api/workspaces/:id/bootstrap` — return workspace metadata, members, role, and active document tree.
+- `POST /api/workspaces/:id/files` — create or restore a file/folder path, creating missing parent folders.
+- `PATCH /api/workspaces/:id/files/:fileId` — rename/move a file or folder, with descendant-path conflict checks.
+- `DELETE /api/workspaces/:id/files/:fileId` — soft-delete a file or a folder and its descendants.
 
 The endpoints reuse existing Prisma models, password hashing, session token format, and the `iw_session` cookie. They are designed to remain compatible with records and sessions created by the current Next.js server.
 
 ## Not yet migrated
 
-Workspace file create/rename/delete, restore and version APIs, the Vite frontend, Socket.IO/collaboration integration, and production deployment cutover are still pending. Other `/api/*` endpoints intentionally return HTTP 501 rather than pretending to work. Keep the current Next.js production start command until the remaining endpoints and collaboration flow have been migrated and tested end to end.
+Workspace restore and version APIs, the Vite frontend, Socket.IO/collaboration integration, and production deployment cutover are still pending. Other `/api/*` endpoints intentionally return HTTP 501 rather than pretending to work. Keep the current Next.js production start command until the remaining endpoints and collaboration flow have been migrated and tested end to end.

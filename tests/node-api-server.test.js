@@ -28,7 +28,7 @@ test("Node API health and unknown routes", async () => {
 
 test("unmigrated API routes explicitly return 501", async () => {
   await withServer(async (base) => {
-    const response = await fetch(`${base}/api/workspaces`);
+    const response = await fetch(`${base}/api/workspaces/demo/versions`);
     assert.equal(response.status, 501);
     assert.match((await response.json()).error, /not been migrated/);
   });
@@ -39,5 +39,21 @@ test("workspace endpoints enforce authentication before reading workspace data",
     const response = await fetch(`${base}/api/workspaces`);
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { error: "Not authenticated" });
+  });
+});
+
+test("file mutations require an authenticated workspace member", async () => {
+  await withServer(async (base) => {
+    const create = await fetch(`${base}/api/workspaces/demo/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "notes.txt", content: "hello" }),
+    });
+    assert.equal(create.status, 401);
+    assert.deepEqual(await create.json(), { error: "Not authenticated" });
+
+    const remove = await fetch(`${base}/api/workspaces/demo/files/file-1`, { method: "DELETE" });
+    assert.equal(remove.status, 401);
+    assert.deepEqual(await remove.json(), { error: "Not authenticated" });
   });
 });

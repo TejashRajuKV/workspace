@@ -238,6 +238,152 @@ async function handleWorkspaceBootstrap(req, res, workspaceId) {
   });
 }
 
+
+import { validateFilePath } from "../src/shared/protocol.js";
+
+async function requireWorkspaceMember(req, res, workspaceId, needEdit = false) {
+  const auth = await requestAuth(req);
+  if (!auth) {
+    sendJson(res, 401, { error: "Not authenticated" });
+    return null;
+  }
+  const membership = await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId: auth.user.id } },
+  });
+  if (!membership) {
+    sendJson(res, 404, { error: "Workspace not found or not a member" });
+    return null;
+  }
+  if (needEdit && membership.role === "viewer") {
+    sendJson(res, 403, { error: "Viewers cannot modify this workspace" });
+    return null;
+  }
+  return { user: auth.user, role: membership.role };
+}
+
+async function notifyFsChanged(workspaceId, kind) {
+  const token = process.env.INTERNAL_TOKEN || (process.env.NODE_ENV === "production" ? "" : "iw-internal-token");
+  if (!token) return;
+  const base = process.env.COLLAB_SERVICE_URL || "http://127.0.0.1:3004";
+  try {
+    await fetch(`${base}/internal/fs-changed`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-token": token },
+      body: JSON.stringify({ workspaceId, kind }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // The filesystem mutation succeeds even when the collaboration service is temporarily unavailable.
+  }
+}
+
+async function ensureParentFolders(workspaceId, path, now) {
+  const parts = path.split("/");
+  parts.pop();
+  let prefix = "";
+  for (const part of parts) {
+    prefix = prefix ? `${prefix}/${part}` : part;
+    const parentPath = prefix + "/";
+    const parent = await db.document.findUnique({
+      where: { workspaceId_path: { workspaceId, path: parentPath } },
+    });
+    if (!parent) {
+      await db.document.create({
+        data: { workspaceId, path: parentPath, isFolder: true, content: "", createdAt: BigInt(now), updatedAt: BigInt(now) },
+      });
+    } else if (parent.deleted) {
+      await db.document.update({
+        where: { id: parent.id },
+        data: { deleted: false, isFolder: true, content: "", updatedAt: BigInt(now) },
+      });
+    }
+  }
+}
+
+async function handleCreateFile(req, res, workspaceId) {
+  const ctx = await requireWorkspaceMember(req, res, workspaceId, true);
+  if (!ctx) return;
+  let body;
+  try { body = await readJson(req); }
+  catch (error) { return sendJson(res, error.status || 400, { error: error.message }); }
+  const pathError = validateFilePath(body?.path);
+  if (pathError) return sendJson(res, 400, { error: pathError });
+  const path = body.path;
+  const isFolder = !!body.isFolder;
+  const content = isFolder ? "" : String(body.content ?? "");
+  if (!isFolder && Buffer.byteLength(content, "utf8") > 512 * 1024) {
+    return sendJson(res, 400, { error: "File too large (max 512KB)" });
+  }
+  try {
+    const existing = await db.document.findUnique({ where: { workspaceId_path: { workspaceId, path } } });
+    if (existing && !existing.deleted) return sendJson(res, 409, { error: "A file with this path already exists" });
+    const now = Date.now();
+    const doc = existing
+      ? await db.document.update({ where: { id: existing.id }, data: { deleted: false, isFolder, content, updatedAt: BigInt(now), createdBy: ctx.user.id } })
+      : await db.document.create({ data: { workspaceId, path, isFolder, content, createdBy: ctx.user.id, createdAt: BigInt(now), updatedAt: BigInt(now) } });
+    await ensureParentFolders(workspaceId, path, now);
+    void notifyFsChanged(workspaceId, "created");
+    return sendJson(res, 201, { doc: { id: doc.id, path: doc.path, isFolder: doc.isFolder } });
+  } catch (error) {
+    if (error?.code === "P2002") return sendJson(res, 409, { error: "A file with this path already exists" });
+    throw error;
+  }
+}
+
+async function handleFileMutation(req, res, workspaceId, fileId) {
+  const ctx = await requireWorkspaceMember(req, res, workspaceId, true);
+  if (!ctx) return;
+  const doc = await db.document.findFirst({ where: { id: fileId, workspaceId, deleted: false } });
+  if (!doc) return sendJson(res, 404, { error: "File not found" });
+
+  if (req.method === "DELETE") {
+    const now = BigInt(Date.now());
+    if (doc.isFolder) {
+      await db.document.updateMany({ where: { workspaceId, path: { startsWith: doc.path } }, data: { deleted: true, updatedAt: now } });
+    }
+    await db.document.update({ where: { id: doc.id }, data: { deleted: true, updatedAt: now } });
+    void notifyFsChanged(workspaceId, "deleted");
+    return sendJson(res, 200, { ok: true });
+  }
+
+  let body;
+  try { body = await readJson(req); }
+  catch (error) { return sendJson(res, error.status || 400, { error: error.message }); }
+  const pathError = validateFilePath(body?.path);
+  if (pathError) return sendJson(res, 400, { error: pathError });
+  const newPath = body.path;
+  if (doc.isFolder && newPath.startsWith(doc.path)) {
+    return sendJson(res, 400, { error: "A folder cannot be moved inside itself" });
+  }
+  const clash = await db.document.findUnique({ where: { workspaceId_path: { workspaceId, path: newPath } } });
+  if (clash && clash.id !== doc.id) {
+    return sendJson(res, 409, { error: clash.deleted ? "Target path belongs to a deleted item; recreate it or choose another path" : "Target path already exists" });
+  }
+  const now = Date.now();
+  if (doc.isFolder) {
+    const children = await db.document.findMany({ where: { workspaceId, path: { startsWith: doc.path } } });
+    const movingIds = new Set(children.map((child) => child.id));
+    const targetPaths = new Set(children.map((child) => newPath + child.path.slice(doc.path.length)));
+    const destinationRows = await db.document.findMany({ where: { workspaceId, path: { startsWith: newPath } }, select: { id: true, path: true } });
+    if (destinationRows.some((row) => targetPaths.has(row.path) && !movingIds.has(row.id))) {
+      return sendJson(res, 409, { error: "A file or folder already exists at the destination path" });
+    }
+    // Move descendants first, matching the existing API behavior.
+    for (const child of children) {
+      await db.document.update({ where: { id: child.id }, data: { path: newPath + child.path.slice(doc.path.length), updatedAt: BigInt(now) } });
+    }
+  }
+  try {
+    await db.document.update({ where: { id: doc.id }, data: { path: newPath, updatedAt: BigInt(now) } });
+  } catch (error) {
+    if (error?.code === "P2002") return sendJson(res, 409, { error: "Target path already exists" });
+    throw error;
+  }
+  await ensureParentFolders(workspaceId, newPath, now);
+  void notifyFsChanged(workspaceId, "renamed");
+  return sendJson(res, 200, { ok: true });
+}
+
 export function createApiServer() {
   return createServer(async (req, res) => {
     const pathname = new URL(req.url || "/", "http://localhost").pathname;
@@ -253,6 +399,14 @@ export function createApiServer() {
       }
       if (pathname === "/api/workspaces" && (req.method === "GET" || req.method === "POST")) {
         return await handleWorkspaces(req, res);
+      }
+      const filesMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)\\/files$/);
+      if (filesMatch && req.method === "POST") {
+        return await handleCreateFile(req, res, decodeURIComponent(filesMatch[1]));
+      }
+      const fileMatch = pathname.match(/^\\/api\\/workspaces\\/([^/]+)\\/files\\/([^/]+)$/);
+      if (fileMatch && (req.method === "PATCH" || req.method === "DELETE")) {
+        return await handleFileMutation(req, res, decodeURIComponent(fileMatch[1]), decodeURIComponent(fileMatch[2]));
       }
       const joinMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/join$/);
       if (joinMatch && req.method === "POST") {
