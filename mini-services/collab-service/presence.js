@@ -26,6 +26,9 @@ export function bindPresence(io) {
           selection: rec.selection,
           view: rec.view,
           editor: rec.editor,
+          status: rec.status,
+          activity: rec.activity,
+          typing: rec.typing,
         };
       }
       ioRef.to(roomId).emit("presence:state", { users, exclude: [...room.keys()] });
@@ -42,6 +45,9 @@ export function joinPresence(roomId, socketId, user) {
     selection: [],
     view: "board",
     editor: null,
+    status: "active",
+    activity: "",
+    typing: false,
   });
   dirty.add(roomId);
 }
@@ -63,6 +69,9 @@ export function updatePresence(roomId, socketId, patch) {
   if ("selection" in patch) rec.selection = Array.isArray(patch.selection) ? patch.selection.slice(0, 500) : [];
   if ("view" in patch) rec.view = patch.view;
   if ("editor" in patch) rec.editor = patch.editor;
+  if ("status" in patch) rec.status = patch.status;
+  if ("activity" in patch) rec.activity = patch.activity;
+  if ("typing" in patch) rec.typing = !!patch.typing;
   dirty.add(roomId);
 }
 

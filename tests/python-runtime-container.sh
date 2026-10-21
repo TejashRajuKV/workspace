@@ -9,7 +9,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 
 PROJECT_DIR="$TEST_ROOT/project"
 BUILD_DIR="$TEST_ROOT/build"
-mkdir -p "$PROJECT_DIR" "$BUILD_DIR/next-service-dist"
+mkdir -p "$PROJECT_DIR" "$BUILD_DIR/app-dist"
 
 cat >"$PROJECT_DIR/requirements.txt" <<'EOF'
 idna==3.10
@@ -28,4 +28,4 @@ docker run --rm \
     --entrypoint sh \
     -v "$BUILD_DIR:/app" \
     "$RUNNER_IMAGE" \
-    -c 'PYTHONPATH=/app/python-runtime/site-packages:/app/next-service-dist python /app/next-service-dist/check_runtime.py'
+    -c 'PYTHONPATH=/app/python-runtime/site-packages:/app/app-dist python /app/app-dist/check_runtime.py'

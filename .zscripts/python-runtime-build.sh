@@ -5,7 +5,7 @@ set -euo pipefail
 PROJECT_DIR="${PROJECT_DIR:-/home/z/my-project}"
 BUILD_DIR="${BUILD_DIR:?BUILD_DIR is required}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
-NEXT_DIST_DIR="$BUILD_DIR/next-service-dist"
+APP_DIST_DIR="$BUILD_DIR/app-dist"
 PYTHON_RUNTIME_DIR="$BUILD_DIR/python-runtime"
 PYTHON_PACKAGES_DIR="$PYTHON_RUNTIME_DIR/site-packages"
 
@@ -36,7 +36,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "🐍 检测到 Python runtime，目标版本: $PYTHON_VERSION"
-mkdir -p "$NEXT_DIST_DIR" "$PYTHON_PACKAGES_DIR"
+mkdir -p "$APP_DIST_DIR" "$PYTHON_PACKAGES_DIR"
 
 install_requirements() {
     local requirements_file="$1"
@@ -114,7 +114,7 @@ if has_python_sources; then
             \) -prune \) \
             -o -type f \( -name '*.py' -o -name '*.pyi' \) -print0 \
             | tar --null -T - -cf -
-    ) | tar -C "$NEXT_DIST_DIR" -xf -
+    ) | tar -C "$APP_DIST_DIR" -xf -
 fi
 
 echo "✅ Python runtime 已固化到部署产物"

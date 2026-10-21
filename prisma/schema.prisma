@@ -1,7 +1,7 @@
 // Real-Time Collaborative Infinite Workspace — database schema
 //
 // Ownership split:
-//   - Next.js API routes (Prisma): users, sessions, workspaces, workspace_members, documents (CRUD)
+//   - Node.js REST API (Prisma): users, sessions, workspaces, workspace_members, documents (CRUD)
 //   - Collaboration mini-service (node:sqlite raw SQL): canvas_objects, operations,
 //     document_operations, snapshots, workspace_state  (hot operation path)
 //   Both share the same SQLite file in WAL mode.
@@ -16,11 +16,11 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  passwordHash String   @map("password_hash")
-  color        String   @default("#10b981")
-  createdAt    BigInt   @default(0) @map("created_at")
+  id           String @id @default(cuid())
+  username     String @unique
+  passwordHash String @map("password_hash")
+  color        String @default("#10b981")
+  createdAt    BigInt @default(0) @map("created_at")
 
   @@map("users")
 }
@@ -36,12 +36,14 @@ model Session {
 }
 
 model Workspace {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
-  description String @default("")
-  ownerId     String @map("owner_id")
-  createdAt   BigInt @default(0) @map("created_at")
-  updatedAt   BigInt @default(0) @map("updated_at")
+  description String  @default("")
+  ownerId     String  @map("owner_id")
+  allowIdJoin Boolean @default(true) @map("allow_id_join")
+  archivedAt  BigInt  @default(0) @map("archived_at")
+  createdAt   BigInt  @default(0) @map("created_at")
+  updatedAt   BigInt  @default(0) @map("updated_at")
 
   @@index([ownerId])
   @@map("workspaces")
@@ -57,6 +59,36 @@ model WorkspaceMember {
   @@unique([workspaceId, userId])
   @@index([userId])
   @@map("workspace_members")
+}
+
+model WorkspaceInvite {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  code        String  @unique // stored hashed
+  role        String  @default("editor") // editor | viewer
+  createdBy   String  @map("created_by")
+  expiresAt   BigInt  @map("expires_at")
+  maxUses     Int     @default(1) @map("max_uses")
+  uses        Int     @default(0)
+  revoked     Boolean @default(false)
+  createdAt   BigInt  @default(0) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("workspace_invites")
+}
+
+// Periodic document content baselines so version history is replayable.
+model DocumentSnapshot {
+  id          Int    @id @default(autoincrement())
+  documentId  String @map("document_id")
+  workspaceId String @map("workspace_id")
+  version     Int
+  content     String
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@unique([documentId, version])
+  @@index([documentId, version])
+  @@map("document_snapshots")
 }
 
 // Materialized current canvas state (owned by collab service).
@@ -93,7 +125,7 @@ model Operation {
   @@map("operations")
 }
 
-// Virtual file system of the code workspace (CRUD via Next.js REST).
+// Virtual file system of the code workspace (CRUD via the Node.js REST API).
 model Document {
   id          String  @id @default(cuid())
   workspaceId String  @map("workspace_id")
@@ -102,9 +134,10 @@ model Document {
   content     String  @default("")
   docVersion  Int     @default(0) @map("doc_version")
   createdBy   String  @default("") @map("created_by")
-  createdAt   BigInt @default(0) @map("created_at")
-  updatedAt   BigInt @default(0) @map("updated_at")
+  createdAt   BigInt  @default(0) @map("created_at")
+  updatedAt   BigInt  @default(0) @map("updated_at")
   deleted     Boolean @default(false)
+  deletedAt   BigInt  @default(0) @map("deleted_at")
 
   @@unique([workspaceId, path])
   @@index([workspaceId])
@@ -126,6 +159,31 @@ model DocumentOperation {
   @@map("document_operations")
 }
 
+model WorkspaceState {
+  workspaceId     String @id @map("workspace_id")
+  version         Int    @default(0)
+  snapshotVersion Int    @default(0) @map("snapshot_version")
+
+  @@map("workspace_state")
+}
+
+model GithubLink {
+  id            String @id @default(cuid())
+  workspaceId   String @unique @map("workspace_id")
+  owner         String
+  repo          String
+  branch        String @default("main")
+  tokenCipher   String @map("token_cipher")
+  tokenIv       String @map("token_iv")
+  tokenTag      String @map("token_tag")
+  lastCommitSha String @default("") @map("last_commit_sha")
+  lastPushedAt  BigInt @default(0) @map("last_pushed_at")
+  createdAt     BigInt @default(0) @map("created_at")
+  updatedAt     BigInt @default(0) @map("updated_at")
+
+  @@map("github_links")
+}
+
 // Periodic full-state snapshots (owned by collab service).
 model Snapshot {
   id          Int    @id @default(autoincrement())
@@ -136,4 +194,133 @@ model Snapshot {
 
   @@index([workspaceId, version])
   @@map("snapshots")
+}
+
+// Persistent per-user notifications (in-app bell + browser Notification API).
+model Notification {
+  id          String @id @default(cuid())
+  userId      String @map("user_id")
+  workspaceId String @default("") @map("workspace_id")
+  type        String // mention | reply | invite | membership | github | system
+  title       String
+  body        String @default("")
+  linkType    String @default("") @map("link_type") // object | document | workspace
+  linkId      String @default("") @map("link_id")
+  actorId     String @default("") @map("actor_id")
+  readAt      BigInt @default(0) @map("read_at")
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+// Uploaded binary assets (board images) kept on disk, referenced by URL.
+model Asset {
+  id          String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  filename    String
+  mime        String @default("application/octet-stream")
+  bytes       Int    @default(0)
+  path        String // relative path under the uploads directory
+  createdBy   String @default("") @map("created_by")
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("assets")
+}
+
+// Reusable workspace templates (files + canvas seed payload).
+model WorkspaceTemplate {
+  id          String @id @default(cuid())
+  name        String
+  description String @default("")
+  createdBy   String @default("") @map("created_by")
+  payload     String @default("{}") // JSON: { files: [...], canvas: [...] }
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([createdBy])
+  @@map("workspace_templates")
+}
+
+// Public, unauthenticated read-only share links (hashed token).
+model ShareLink {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  tokenHash   String  @unique @map("token_hash")
+  role        String  @default("viewer")
+  createdBy   String  @default("") @map("created_by")
+  expiresAt   BigInt  @default(0) @map("expires_at")
+  revoked     Boolean @default(false)
+  createdAt   BigInt  @default(0) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("share_links")
+}
+
+// Automation: outgoing webhook endpoints (HMAC-signed).
+model Webhook {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  url         String
+  secret      String  @default("") // stored hashed
+  events      String  @default("") // comma-separated event names, or "*"
+  enabled     Boolean @default(true)
+  createdBy   String  @default("") @map("created_by")
+  createdAt   BigInt  @default(0) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("webhooks")
+}
+
+// Automation: delivery outbox with bounded retries.
+model WebhookDelivery {
+  id            Int    @id @default(autoincrement())
+  webhookId     String @map("webhook_id")
+  workspaceId   String @map("workspace_id")
+  event         String
+  payload       String @default("{}")
+  status        String @default("pending") // pending | delivered | failed
+  attempts      Int    @default(0)
+  nextAttemptAt BigInt @default(0) @map("next_attempt_at")
+  lastStatus    Int    @default(0) @map("last_status")
+  lastError     String @default("") @map("last_error")
+  createdAt     BigInt @default(0) @map("created_at")
+  deliveredAt   BigInt @default(0) @map("delivered_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+// Automation: recurring export/backup jobs per workspace.
+model ScheduledJob {
+  id          String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  kind        String @default("export") // export
+  intervalMs  Int    @default(86400000) @map("interval_ms")
+  enabled     Boolean @default(true)
+  lastRunAt   BigInt @default(0) @map("last_run_at")
+  nextRunAt   BigInt @default(0) @map("next_run_at")
+  lastError   String @default("") @map("last_error")
+  createdBy   String @default("") @map("created_by")
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([enabled, nextRunAt])
+  @@map("scheduled_jobs")
+}
+
+// Automation: simple trigger→action rules.
+model AutomationRule {
+  id          String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  name        String @default("")
+  trigger     String // file.created | file.updated | comment.created | github.pull | ...
+  action      String // webhook | notify
+  config      String @default("{}")
+  enabled     Boolean @default(true)
+  createdBy   String @default("") @map("created_by")
+  createdAt   BigInt @default(0) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("automation_rules")
 }

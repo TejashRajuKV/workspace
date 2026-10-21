@@ -3,38 +3,31 @@
 // Collaborative code editor panel: Monaco + tabs + remote cursors.
 // Monaco is vendored locally (public/monaco) so the app is fully self-hosted.
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Editor, { loader } from "@monaco-editor/react";
-import { X } from "lucide-react";
+import { Eye, History, Pencil, Search, Settings2, X } from "lucide-react";
 import { useCode } from "@/state/code";
 import { useBoard, sendPresence } from "@/state/board";
 import { on } from "@/lib/socket";
+import { languageOf } from "@/lib/language";
+import { renderMarkdown } from "@/lib/markdown";
 import TextOperation from "@/shared/ot";
+import SearchPanel from "./SearchPanel";
+import FileHistoryDialog from "./FileHistoryDialog";
 
 loader.config({ paths: { vs: "/monaco/vs" } });
 
-function languageOf(path) {
-  const ext = path.split(".").pop()?.toLowerCase();
-  switch (ext) {
-    case "js":
-    case "mjs":
-      return "javascript";
-    case "py":
-      return "python";
-    case "json":
-      return "json";
-    case "html":
-      return "html";
-    case "css":
-      return "css";
-    case "md":
-      return "markdown";
-    default:
-      return "plaintext";
-  }
-}
-
 const remotesRef = { users: new Map() }; // userId → {name, color, fileId, offset, anchor}
+const SETTINGS_KEY = "iw.editor.settings.v1";
+const DEFAULT_SETTINGS = { fontSize: 13, wordWrap: false, minimap: false };
+
+function readSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_SETTINGS };
+}
 
 export default function CodePanel({ onRunFile }) {
   const docs = useCode((s) => s.docs);
@@ -43,12 +36,65 @@ export default function CodePanel({ onRunFile }) {
   const openDoc = useCode((s) => s.openDoc);
   const closeDoc = useCode((s) => s.closeDoc);
   const role = useBoard((s) => s.role);
+  const workspaceId = useBoard((s) => s.wsId);
 
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const modelsRef = useRef(new Map()); // docId → monaco model
   const applyingRef = useRef(false);
+  const revealRef = useRef(null); // { docId, line } pending scroll-to-line
   const activeDoc = docs.find((d) => d.id === activeDocId);
+  const isMarkdown = /\.(md|markdown)$/i.test(activeDoc?.path || "");
+  const [preview, setPreview] = useState(false);
+  const fsTick = useCode((s) => s.fsTick);
+
+  // live document text (OT state wins over the last bootstrap snapshot)
+  const liveText = useMemo(() => {
+    const state = useCode.getState().getDocState(activeDocId);
+    return state?.content ?? activeDoc?.content ?? "";
+  }, [activeDocId, activeDoc, fsTick]);
+
+  const previewHtml = useMemo(
+    () => (preview && isMarkdown ? renderMarkdown(liveText) : ""),
+    [preview, isMarkdown, liveText]
+  );
+  const [showSearch, setShowSearch] = useState(false);
+  const [historyDocId, setHistoryDocId] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(readSettings);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {}
+  }, [settings]);
+
+  useEffect(() => {
+    const onHistory = (e) => {
+      const docId = e.detail?.docId;
+      if (docId) setHistoryDocId(docId);
+    };
+    const onReveal = (e) => {
+      const { docId, line } = e.detail || {};
+      if (!docId) return;
+      revealRef.current = { docId, line: line || 1 };
+      useCode.getState().openDoc(docId);
+    };
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+    window.addEventListener("iw-open-history", onHistory);
+    window.addEventListener("iw-reveal-line", onReveal);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("iw-open-history", onHistory);
+      window.removeEventListener("iw-reveal-line", onReveal);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   const updateRemoteCursors = useCallback(() => {
     const monaco = monacoRef.current;
@@ -157,11 +203,24 @@ export default function CodePanel({ onRunFile }) {
       inherit: true,
       rules: [],
       colors: {
-        "editor.background": "#10141d",
-        "editorGutter.background": "#10141d",
-        "editor.lineHighlightBackground": "#161b26",
-        "editorLineNumber.foreground": "#3a455e",
-        "editorCursor.foreground": "#10b981",
+        "editor.background": "#201317",
+        "editorGutter.background": "#201317",
+        "editor.lineHighlightBackground": "#2a181d",
+        "editorLineNumber.foreground": "#7a5a52",
+        "editorLineNumber.activeForeground": "#f6c177",
+        "editorCursor.foreground": "#f4a261",
+        "editor.selectionBackground": "#7a4a3a66",
+        "editor.inactiveSelectionBackground": "#7a4a3a33",
+        "editor.selectionHighlightBackground": "#7a4a3a44",
+        "editorWidget.background": "#2a181d",
+        "editorWidget.border": "#43272e",
+        "editorSuggestWidget.background": "#2a181d",
+        "editorHoverWidget.background": "#2a181d",
+        "editorIndentGuide.background1": "#3a252b",
+        "editorIndentGuide.activeBackground1": "#5a3a3a",
+        "editorWhitespace.foreground": "#3a252b",
+        "scrollbarSlider.background": "#4a2c3380",
+        "scrollbarSlider.hoverBackground": "#65394180",
       },
     });
     monaco.editor.setTheme("iw-dark");
@@ -274,6 +333,13 @@ export default function CodePanel({ onRunFile }) {
     }
     if (editor.getModel() !== model) editor.setModel(model);
     editor.updateOptions({ readOnly: st.role === "viewer" });
+    if (revealRef.current && revealRef.current.docId === doc.id) {
+      const line = revealRef.current.line;
+      revealRef.current = null;
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: 1 });
+      editor.focus();
+    }
     updateRemoteCursors();
   }, [updateRemoteCursors]);
 
@@ -314,48 +380,137 @@ export default function CodePanel({ onRunFile }) {
   // (per-user label styles are injected by the presence:state handler)
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[#10141d]">
+    <div className="flex flex-col h-full min-h-0 bg-[#201317]">
       {/* tabs */}
-      <div className="flex items-stretch border-b border-[#232b3b] overflow-x-auto flex-none">
-        {openTabs.length === 0 && (
-          <div className="px-3 py-2 text-xs text-[#5b6478]">No tabs open</div>
-        )}
-        {openTabs.map((id) => {
-          const doc = docs.find((d) => d.id === id);
-          if (!doc) return null;
-          const active = id === activeDocId;
-          return (
-            <div
-              key={id}
-              className={`flex items-center gap-1.5 pl-3 pr-1.5 py-2 text-xs border-r border-[#232b3b] cursor-pointer whitespace-nowrap ${
-                active ? "bg-[#161b26] text-[#e6e9ef]" : "text-[#8b94a7] hover:text-[#cbd2e0]"
-              }`}
-              onClick={() => openDoc(id)}
-            >
-              <span className="truncate max-w-40">{doc.path}</span>
-              <button
-                className="p-0.5 rounded hover:bg-[#232b3b]"
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  closeDoc(id);
-                }}
+      <div className="flex items-stretch border-b border-[#43272e] flex-none">
+        <div className="flex items-stretch overflow-x-auto flex-1 min-w-0">
+          {openTabs.length === 0 && (
+            <div className="px-3 py-2 text-xs text-[#a1847a]">No tabs open</div>
+          )}
+          {openTabs.map((id) => {
+            const doc = docs.find((d) => d.id === id);
+            if (!doc) return null;
+            const active = id === activeDocId;
+            return (
+              <div
+                key={id}
+                className={`flex items-center gap-1.5 pl-3 pr-1.5 py-2 text-xs border-r border-[#43272e] cursor-pointer whitespace-nowrap ${
+                  active ? "bg-[#2a181d] text-[#fbeeda]" : "text-[#c3a596] hover:text-[#f3ddc9]"
+                }`}
+                onClick={() => openDoc(id)}
               >
-                <X size={11} />
-              </button>
-            </div>
-          );
-        })}
+                <span className="truncate max-w-40">{doc.path}</span>
+                <button
+                  className="p-0.5 rounded hover:bg-[#43272e]"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    closeDoc(id);
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-0.5 px-1.5 border-l border-[#43272e] flex-none">
+          <button
+            className="p-1.5 rounded text-[#c3a596] hover:text-amber-400 hover:bg-[#332026]"
+            title="Search in files (Ctrl+Shift+F)"
+            onClick={() => setShowSearch((v) => !v)}
+          >
+            <Search size={14} />
+          </button>
+          <button
+            className="p-1.5 rounded text-[#c3a596] hover:text-amber-400 hover:bg-[#332026] disabled:opacity-40"
+            title="File history"
+            onClick={() => activeDocId && setHistoryDocId(activeDocId)}
+            disabled={!activeDocId}
+          >
+            <History size={14} />
+          </button>
+          {isMarkdown && (
+            <button
+              className={`p-1.5 rounded hover:bg-[#332026] ${preview ? "text-amber-400" : "text-[#c3a596] hover:text-amber-400"}`}
+              title={preview ? "Edit markdown" : "Preview markdown"}
+              onClick={() => setPreview((v) => !v)}
+            >
+              {preview ? <Pencil size={14} /> : <Eye size={14} />}
+            </button>
+          )}
+          <div className="relative">
+            <button
+              className="p-1.5 rounded text-[#c3a596] hover:text-amber-400 hover:bg-[#332026]"
+              title="Editor settings"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowSettings((v) => !v);
+              }}
+            >
+              <Settings2 size={14} />
+            </button>
+            {showSettings && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border border-[#43272e] bg-[#2a181d] shadow-xl p-3 text-xs space-y-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <label className="flex items-center justify-between gap-2 text-[#c3a596]">
+                  Font size
+                  <input
+                    type="number"
+                    min="10"
+                    max="24"
+                    className="w-14 rounded border border-[#43272e] bg-[#1c1015] px-1.5 py-0.5 text-[#fbeeda]"
+                    value={settings.fontSize}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        fontSize: Math.min(24, Math.max(10, Number(e.target.value) || 13)),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[#c3a596] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-amber-500"
+                    checked={settings.wordWrap}
+                    onChange={(e) => setSettings((s) => ({ ...s, wordWrap: e.target.checked }))}
+                  />
+                  Word wrap
+                </label>
+                <label className="flex items-center gap-2 text-[#c3a596] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-amber-500"
+                    checked={settings.minimap}
+                    onChange={(e) => setSettings((s) => ({ ...s, minimap: e.target.checked }))}
+                  />
+                  Minimap
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {showSearch && <SearchPanel open={showSearch} onClose={() => setShowSearch(false)} />}
 
       {/* editor */}
       <div className="flex-1 min-h-0">
-        {activeDocId ? (
+        {activeDocId && previewHtml ? (
+          <div
+            className="h-full overflow-y-auto px-5 py-4 md-preview"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        ) : activeDocId ? (
           <Editor
             height="100%"
             theme="iw-dark"
             options={{
-              fontSize: 13,
-              minimap: { enabled: false },
+              fontSize: settings.fontSize,
+              wordWrap: settings.wordWrap ? "on" : "off",
+              minimap: { enabled: settings.minimap },
               scrollBeyondLastLine: false,
               automaticLayout: true,
               tabSize: 2,
@@ -369,11 +524,18 @@ export default function CodePanel({ onRunFile }) {
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center gap-1 px-6 text-center">
-            <span className="text-sm text-[#cbd2e0]">No file open</span>
-            <span className="text-xs text-[#5b6478]">Pick a file from the explorer, or create one with the + buttons.</span>
+            <span className="text-sm text-[#f3ddc9]">No file open</span>
+            <span className="text-xs text-[#a1847a]">Pick a file from the explorer, or create one with the + buttons.</span>
           </div>
         )}
       </div>
+
+      <FileHistoryDialog
+        workspaceId={workspaceId}
+        docId={historyDocId}
+        open={!!historyDocId}
+        onClose={() => setHistoryDocId(null)}
+      />
     </div>
   );
 }

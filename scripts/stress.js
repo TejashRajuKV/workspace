@@ -6,9 +6,9 @@
 // clients over Socket.IO submitting canvas operations. Reports latency
 // percentiles (ack round-trip), throughput, and sync failures.
 //
-// Prerequisites: Next.js dev server (:3000) + collab service (:3003).
+// Prerequisites: web server (:3000) + collab service (:3003).
 
-const { io } = require("socket.io-client");
+import { io } from "socket.io-client";
 
 const USERS = parseInt(process.argv[2] || "10", 10);
 const OPS = parseInt(process.argv[3] || "50", 10);

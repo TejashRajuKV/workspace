@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Maximize2 } from "lucide-react";
 import { useBoard, boardRefs, sendPresence } from "@/state/board";
 import { Quadtree } from "./canvas-engine/quadtree";
 import { createRenderer } from "./canvas-engine/renderer";
@@ -24,6 +25,7 @@ export default function CanvasBoard() {
     const quad = new Quadtree();
     const renderer = createRenderer(canvas, quad);
     engineRef.current = { quad, renderer, interactions: null };
+    boardRefs.renderer = renderer;
 
     const resize = () => renderer.resize();
     resize();
@@ -89,6 +91,9 @@ export default function CanvasBoard() {
       onNewText: ({ x, y }) => {
         setEditor({ objId: null, kind: "text", world: { x, y }, value: "" });
       },
+      onOpenComment: ({ objId }) => {
+        useBoard.getState().openComment(objId);
+      },
     });
     engineRef.current.interactions = interactions;
 
@@ -97,6 +102,35 @@ export default function CanvasBoard() {
       window.removeEventListener("resize", resize);
       clearInterval(zTimer);
       interactions.destroy();
+    };
+  }, []);
+
+  // ---- presence+ : active/idle/away status (visibility + idle timer) ----
+  useEffect(() => {
+    let idleTimer = null;
+    let awayTimer = null;
+    const publish = (status) => sendPresence({ status });
+    const bump = () => {
+      publish("active");
+      clearTimeout(idleTimer);
+      clearTimeout(awayTimer);
+      idleTimer = setTimeout(() => publish("idle"), 60_000);
+      awayTimer = setTimeout(() => publish("away"), 5 * 60_000);
+    };
+    const onVis = () => {
+      if (document.hidden) publish("away");
+      else bump();
+    };
+    bump();
+    window.addEventListener("pointermove", bump, { passive: true });
+    window.addEventListener("keydown", bump);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearTimeout(idleTimer);
+      clearTimeout(awayTimer);
+      window.removeEventListener("pointermove", bump);
+      window.removeEventListener("keydown", bump);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 
@@ -167,7 +201,7 @@ export default function CanvasBoard() {
         w: 260,
         h: Math.max(30, (text.split("\n").length || 1) * (s.style.fontSize || 16) * 1.4),
         rot: 0,
-        style: makeStyle({ ...s.style, fill: "transparent", align: "left" }),
+        style: makeStyle({ ...s.style, fill: "transparent", align: s.style.align || "left" }),
         data: { text },
       };
       const op = { type: OP.CREATE, oid: id, p: { object: { id, type: "text", payload, z: max + 1 } } };
@@ -176,12 +210,55 @@ export default function CanvasBoard() {
     }
   };
 
+  // Zoom to fit every object on the board (Canva-style "fit page").
+  const fitView = () => {
+    const s = useBoard.getState();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const w = canvas.clientWidth || 1;
+    const h = canvas.clientHeight || 1;
+    if (!s.objects.size) {
+      s.setCamera({ x: -w / 2, y: -h / 2, zoom: 1 });
+      return;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const obj of s.objects.values()) {
+      const b = objectBounds(obj);
+      if (![b.x, b.y, b.w, b.h].every(Number.isFinite)) continue;
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.w);
+      maxY = Math.max(maxY, b.y + b.h);
+    }
+    if (!Number.isFinite(minX)) {
+      s.setCamera({ x: -w / 2, y: -h / 2, zoom: 1 });
+      return;
+    }
+    const pad = 80;
+    const zoom = Math.max(
+      0.02,
+      Math.min(
+        3,
+        Math.min(
+          (w - pad) / Math.max(maxX - minX, 1),
+          (h - pad) / Math.max(maxY - minY, 1)
+        )
+      )
+    );
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    s.setCamera({ zoom, x: cx - w / (2 * zoom), y: cy - h / (2 * zoom) });
+  };
+
   return (
     <div className="relative flex-1 min-w-0 overflow-hidden">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full touch-none"
-        style={{ background: "#f7f8fb" }}
+        style={{ background: "#fff7ec" }}
       />
       {editor && (
         <textarea
@@ -191,7 +268,7 @@ export default function CanvasBoard() {
           }}
           autoFocus
           defaultValue={editor.value}
-          className="absolute z-30 rounded-md border-2 resize-none overflow-hidden p-2 leading-snug outline-none bg-white text-slate-900 shadow-lg"
+          className="absolute z-30 rounded-md border-2 resize-none overflow-hidden p-2 leading-snug outline-none bg-[#fff7ec] text-[#2a181d] shadow-lg"
           style={{ position: "fixed", display: "none" }}
           placeholder="Type text…"
           onKeyDown={(ev) => {
@@ -202,9 +279,18 @@ export default function CanvasBoard() {
           onBlur={() => commitEditor(true)}
         />
       )}
-      <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg bg-white/90 shadow px-1.5 py-1 text-xs text-slate-600 border border-slate-200 select-none">
+      <div className="absolute bottom-3 right-3 flex items-center gap-0.5 rounded-lg bg-[#fff7ec]/95 shadow px-1.5 py-1 text-xs text-[#6b4a44] border border-[#e8d0b8] select-none">
         <button
-          className="px-1.5 hover:bg-slate-100 rounded"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#f6e3d2]"
+          title="Zoom to fit everything"
+          onClick={fitView}
+        >
+          <Maximize2 size={12} /> Fit
+        </button>
+        <span className="w-px h-4 bg-[#e8d0b8] mx-0.5" />
+        <button
+          className="px-1.5 rounded hover:bg-[#f6e3d2]"
+          title="Zoom out"
           onClick={() => {
             const s = useBoard.getState();
             const canvas = canvasRef.current;
@@ -213,9 +299,20 @@ export default function CanvasBoard() {
         >
           −
         </button>
-        <span className="w-10 text-center font-medium">{zoomLabel}%</span>
         <button
-          className="px-1.5 hover:bg-slate-100 rounded"
+          className="w-11 text-center font-medium py-0.5 rounded hover:bg-[#f6e3d2]"
+          title="Click to reset to 100%"
+          onClick={() => {
+            const s = useBoard.getState();
+            const canvas = canvasRef.current;
+            s.setCamera(zoomCam(s.camera, canvas.clientWidth / 2, canvas.clientHeight / 2, 1 / s.camera.zoom));
+          }}
+        >
+          {zoomLabel}%
+        </button>
+        <button
+          className="px-1.5 rounded hover:bg-[#f6e3d2]"
+          title="Zoom in"
           onClick={() => {
             const s = useBoard.getState();
             const canvas = canvasRef.current;

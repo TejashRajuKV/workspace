@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # 配置项
-ROOT_DIR="/home/z/my-project/mini-services"
+ROOT_DIR="/home/z/my-project"
 DIST_DIR="/tmp/build_fullstack_$BUILD_ID/mini-services-dist"
 
 main() {
-    echo "🚀 开始批量构建..."
+    echo "🚀 开始批量打包..."
     
     # 检查 rootdir 是否存在
-    if [ ! -d "$ROOT_DIR" ]; then
-        echo "ℹ️  目录 $ROOT_DIR 不存在，跳过构建"
+    if [ ! -d "$ROOT_DIR/mini-services" ]; then
+        echo "ℹ️  目录 $ROOT_DIR/mini-services 不存在，跳过打包"
         return
     fi
     
@@ -20,8 +20,17 @@ main() {
     success_count=0
     fail_count=0
     
+    # 服务源码里有 ../../src/shared/*.js 这类相对引用（协议常量、校验逻辑），
+    # 按源码目录结构原样拷贝比打包成单文件更可靠，也省掉打包器这层依赖。
+    if [ -d "$ROOT_DIR/src/shared" ]; then
+        mkdir -p "$DIST_DIR/src"
+        rm -rf "$DIST_DIR/src/shared"
+        cp -r "$ROOT_DIR/src/shared" "$DIST_DIR/src/shared"
+        echo "📄 已复制共享模块 src/shared"
+    fi
+    
     # 遍历 mini-services 目录下的所有文件夹
-    for dir in "$ROOT_DIR"/*; do
+    for dir in "$ROOT_DIR"/mini-services/*; do
         # 检查是否是目录且包含 package.json
         if [ -d "$dir" ] && [ -f "$dir/package.json" ]; then
             project_name=$(basename "$dir")
@@ -30,7 +39,7 @@ main() {
             entry_path=""
             for entry in "src/index.ts" "index.ts" "src/index.js" "index.js"; do
                 if [ -f "$dir/$entry" ]; then
-                    entry_path="$dir/$entry"
+                    entry_path="$entry"
                     break
                 fi
             done
@@ -41,21 +50,38 @@ main() {
             fi
             
             echo ""
-            echo "📦 正在构建: $project_name..."
+            echo "📦 正在打包: $project_name..."
             
-            # 使用 bun build CLI 构建
-            output_file="$DIST_DIR/mini-service-$project_name.js"
-            
-            if bun build "$entry_path" \
-                --outfile "$output_file" \
-                --target bun \
-                --minify; then
-                echo "✅ $project_name 构建成功 -> $output_file"
-                success_count=$((success_count + 1))
-            else
-                echo "❌ $project_name 构建失败"
+            if [ ! -d "$dir/node_modules" ]; then
+                echo "❌ $project_name 缺少 node_modules，请先运行 mini-services-install.sh"
                 fail_count=$((fail_count + 1))
+                continue
             fi
+            
+            target="$DIST_DIR/mini-services/$project_name"
+            rm -rf "$target"
+            mkdir -p "$target"
+            
+            # 拷贝源码（跳过 node_modules 与日志），再单独带上已安装的依赖
+            (
+                cd "$dir" \
+                    && tar --exclude='./node_modules' \
+                           --exclude='./node_modules/**' \
+                           --exclude='./*.log' \
+                           --exclude='./.env' \
+                           -cf - .
+            ) | tar -C "$target" -xf -
+            cp -r "$dir/node_modules" "$target/node_modules"
+            
+            if [ ! -f "$target/$entry_path" ]; then
+                echo "❌ $project_name 打包后缺少入口 $entry_path"
+                fail_count=$((fail_count + 1))
+                rm -rf "$target"
+                continue
+            fi
+            
+            echo "✅ $project_name 打包成功 -> $target"
+            success_count=$((success_count + 1))
         fi
     done
     
@@ -75,4 +101,3 @@ main() {
 }
 
 main
-

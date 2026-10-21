@@ -25,8 +25,8 @@ main() {
             echo ""
             echo "📦 正在安装依赖: $project_name..."
             
-            # 进入项目目录并执行 bun install
-            if (cd "$dir" && bun install); then
+            # 进入项目目录并执行 npm install
+            if (cd "$dir" && npm install); then
                 echo "✅ $project_name 依赖安装成功"
                 success_count=$((success_count + 1))
             else

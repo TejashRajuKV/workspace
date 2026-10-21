@@ -21,13 +21,15 @@ import { OP, LIMITS } from "./protocol.js";
 
 export function makeStyle(overrides = {}) {
   return {
-    fill: "#dbe4f0",
-    stroke: "#31405c",
+    fill: "#f6ddc0",
+    stroke: "#6b4a44",
     strokeWidth: 2,
     opacity: 1,
     fontSize: 16,
-    color: "#1c2433",
+    color: "#2a181d",
     align: "center",
+    dash: 0,
+    cornerRadius: 3,
     ...overrides,
   };
 }
@@ -74,9 +76,14 @@ export function objectBounds(obj) {
     by = p.y + minY;
     bw = Math.max(maxX - minX, 1);
     bh = Math.max(maxY - minY, 1);
+  } else if (obj.type === "comment") {
+    // pins render at a constant screen size; the AABB only needs to be
+    // generous enough for the quadtree broad phase
+    bx = p.x - 4;
+    by = p.y - 4;
+    bw = 32;
+    bh = 32;
   } else if (obj.type === "connector") {
-    // endpoints resolved at render time from referenced objects; bounds are
-    // kept loose (fromPt/toPt or full-world fallback handled by renderer)
     const fp = p.data?.fromPt,
       tp = p.data?.toPt;
     if (fp && tp) {
@@ -186,6 +193,36 @@ export function applyCanvasOp(objects, op, userId, now = Date.now()) {
     case OP.ZORDER:
       if (!obj) return false;
       obj.z = p.z;
+      obj.updatedAt = now;
+      return true;
+    case OP.COMMENT: {
+      if (!obj) return false;
+      if (!obj.payload.data) obj.payload.data = {};
+      if (p.action === "reply") {
+        const thread = Array.isArray(obj.payload.data.thread)
+          ? obj.payload.data.thread
+          : (obj.payload.data.thread = []);
+        thread.push({
+          id: p.entry.id,
+          authorId: p.entry.authorId || userId,
+          authorName: p.entry.authorName || "",
+          body: p.entry.body,
+          at: p.entry.at || now,
+        });
+        if (thread.length > LIMITS.MAX_THREAD_ENTRIES)
+          thread.splice(0, thread.length - LIMITS.MAX_THREAD_ENTRIES);
+      } else if (p.action === "resolve") {
+        obj.payload.data.resolved = p.resolved === true;
+      } else if (p.action === "edit") {
+        obj.payload.data.text = p.text;
+      }
+      obj.updatedAt = now;
+      return true;
+    }
+    case OP.GROUP:
+      if (!obj) return false;
+      if (p.groupId) obj.payload.groupId = p.groupId;
+      else delete obj.payload.groupId;
       obj.updatedAt = now;
       return true;
     default:

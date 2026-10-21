@@ -57,23 +57,24 @@ DEFAULT_PACKAGED_DB_PATH="/app/db/custom.db"
 DEFAULT_PACKAGED_DATABASE_URL="file:$DEFAULT_PACKAGED_DB_PATH"
 
 # Python 依赖在构建阶段安装进部署产物，不复用 Sandbox 的 /home/z/.venv。
-# Next.js 及其启动的子进程都会继承这组路径。
+# 应用及其启动的子进程都会继承这组路径。
 if [ -d "/app/python-runtime/site-packages" ]; then
-    export PYTHONPATH="/app/python-runtime/site-packages:/app/next-service-dist${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="/app/python-runtime/site-packages:/app/app-dist${PYTHONPATH:+:$PYTHONPATH}"
     export PATH="/app/python-runtime/site-packages/bin:$PATH"
     export PYTHONDONTWRITEBYTECODE=1
     export PYTHONUNBUFFERED=1
     echo "🐍 已启用部署包内 Python runtime: $(python --version 2>&1)"
 fi
 
-# 启动 Next.js 服务器
-if [ -f "./next-service-dist/server.js" ]; then
-    echo "🚀 启动 Next.js 服务器..."
-    cd next-service-dist/ || exit 1
+# 启动 Node.js 应用服务器
+if [ -f "./app-dist/server/index.js" ]; then
+    echo "🚀 启动 Node.js 应用服务器..."
+    cd app-dist/ || exit 1
     
     # 设置环境变量
     export NODE_ENV=production
     export PORT="${PORT:-3000}"
+    export HOST="${HOST:-0.0.0.0}"
     export HOSTNAME="${HOSTNAME:-0.0.0.0}"
     export DATABASE_URL="${DATABASE_URL:-$DEFAULT_PACKAGED_DATABASE_URL}"
 
@@ -88,25 +89,42 @@ if [ -f "./next-service-dist/server.js" ]; then
     else
         echo "🗄️  当前使用外部指定数据库: $DATABASE_URL"
     fi
-    
-    # 后台启动 Next.js
-    bun server.js &
-    NEXT_PID=$!
-    pids="$NEXT_PID"
+
+    if [ ! -f "./dist/client/index.html" ]; then
+        echo "❌ 未找到前端构建产物 ./dist/client/index.html"
+        echo "   打包流程缺少 npm run build 的结果，启动已终止"
+        exit 1
+    fi
+
+    # 后台启动 Node.js 应用服务器
+    node server/index.js &
+    APP_PID=$!
+    pids="$APP_PID"
     
     # 等待一小段时间检查进程是否成功启动
-    sleep 1
-    if ! kill -0 "$NEXT_PID" 2>/dev/null; then
-        echo "❌ Next.js 服务器启动失败"
+    sleep 2
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo "❌ Node.js 应用服务器启动失败"
         exit 1
     else
-        echo "✅ Next.js 服务器已启动 (PID: $NEXT_PID, Port: $PORT)"
+        echo "✅ Node.js 应用服务器已启动 (PID: $APP_PID, Port: $PORT)"
     fi
     
     cd ../
 else
-    echo "⚠️  未找到 Next.js 服务器文件: ./next-service-dist/server.js"
+    echo "⚠️  未找到 Node.js 应用服务器文件: ./app-dist/server/index.js"
 fi
+
+# 协作服务与应用必须共用同一个 SQLite 文件，否则两侧数据会分叉。
+if [ -z "${DATABASE_PATH:-}" ]; then
+    case "${DATABASE_URL:-}" in
+        file:*) DATABASE_PATH="${DATABASE_URL#file:}" ;;
+        *) DATABASE_PATH="$DEFAULT_PACKAGED_DB_PATH" ;;
+    esac
+fi
+export DATABASE_PATH
+export COLLAB_SERVICE_URL="${COLLAB_SERVICE_URL:-http://127.0.0.1:3004}"
+export INTERNAL_TOKEN="${INTERNAL_TOKEN:-iw-internal-token}"
 
 # 启动 mini-services
 if [ -f "./mini-services-start.sh" ]; then

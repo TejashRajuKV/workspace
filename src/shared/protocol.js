@@ -1,6 +1,6 @@
 // ============================================================
 // Shared protocol constants + validation
-// Used by: browser client, Next.js API routes, collaboration service
+// Used by: browser client, Node.js REST API, collaboration service
 // ============================================================
 
 // Canvas operation types. Every operation is a small, serializable intent —
@@ -14,6 +14,8 @@ export const OP = {
   STYLE: "style", // p: { style }               (absolute full style)
   TEXT: "text", // p: { text }
   ZORDER: "zorder", // p: { z }
+  COMMENT: "comment", // p: { action, entry?, text?, resolved? }
+  GROUP: "group", // p: { groupId }              (absolute; "" = ungroup)
 };
 
 export const OBJECT_TYPES = [
@@ -26,6 +28,8 @@ export const OBJECT_TYPES = [
   "sticky",
   "image",
   "connector",
+  "comment",
+  "frame",
 ];
 
 // Server-side safety limits (validated on EVERY operation, never trusted)
@@ -41,6 +45,8 @@ export const LIMITS = {
   MAX_TITLE: 120,
   MAX_PATH: 240,
   MAX_FILE_BYTES: 512 * 1024,
+  MAX_THREAD_ENTRIES: 200,
+  MAX_COMMENT_BODY: 4000,
   DOC_OP_RATE: 80, // per second per socket
   CANVAS_OP_RATE: 100, // per second per socket (burst allowed via bucket)
 };
@@ -68,6 +74,10 @@ export function opSummary(op) {
       return "edited text";
     case OP.ZORDER:
       return "changed layer";
+    case OP.COMMENT:
+      return op.p?.action === "reply" ? "commented" : op.p?.action === "resolve" ? "resolved comment" : "edited comment";
+    case OP.GROUP:
+      return op.p?.groupId ? "grouped" : "ungrouped";
     default:
       return op.type;
   }
@@ -150,6 +160,35 @@ export function validateCanvasOp(raw) {
     case OP.ZORDER:
       if (!objId || !num(p.z)) return { ok: false, error: "bad z" };
       return { ok: true, op: { type, oid: objId, p: { z: Math.round(p.z) } } };
+    case OP.COMMENT: {
+      if (!objId) return { ok: false, error: "bad oid" };
+      if (p.action === "reply") {
+        const entry = p.entry;
+        if (!entry || typeof entry !== "object" || typeof entry.body !== "string")
+          return { ok: false, error: "bad entry" };
+        const body = entry.body.slice(0, LIMITS.MAX_COMMENT_BODY);
+        if (!body.trim()) return { ok: false, error: "empty comment" };
+        const id = typeof entry.id === "string" && entry.id ? entry.id.slice(0, 64) : newCommentEntryId();
+        return {
+          ok: true,
+          op: { type, oid: objId, p: { action: "reply", entry: { id, body, at: Date.now() } } },
+        };
+      }
+      if (p.action === "resolve")
+        return { ok: true, op: { type, oid: objId, p: { action: "resolve", resolved: p.resolved === true } } };
+      if (p.action === "edit") {
+        if (typeof p.text !== "string") return { ok: false, error: "bad text" };
+        if (p.text.length > LIMITS.MAX_COMMENT_BODY) return { ok: false, error: "comment too long" };
+        return { ok: true, op: { type, oid: objId, p: { action: "edit", text: p.text } } };
+      }
+      return { ok: false, error: "bad action" };
+    }
+    case OP.GROUP:
+      if (!objId) return { ok: false, error: "bad oid" };
+      return {
+        ok: true,
+        op: { type, oid: objId, p: { groupId: typeof p.groupId === "string" ? p.groupId.slice(0, 64) : "" } },
+      };
     default:
       return { ok: false, error: "unknown" };
   }
@@ -167,6 +206,8 @@ export function sanitizeStyle(style) {
   out.fontSize = num(style.fontSize, 6, 400);
   out.color = str(style.color, 32);
   out.align = ["left", "center", "right"].includes(style.align) ? style.align : undefined;
+  out.dash = num(style.dash, 0, 100);
+  out.cornerRadius = num(style.cornerRadius, 0, 500);
   for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
   return out;
 }
@@ -183,6 +224,7 @@ export function normalizeObjectPayload(obj) {
   h = Math.min(Math.max(h, 1), 200000);
   const rot = num(obj.rot);
   const style = sanitizeStyle(obj.style || {});
+  const groupId = typeof obj.groupId === "string" ? obj.groupId.slice(0, 64) : "";
   let data = {};
 
   switch (obj.type) {
@@ -211,9 +253,32 @@ export function normalizeObjectPayload(obj) {
     }
     case "image": {
       const src = typeof obj.data?.src === "string" ? obj.data.src : "";
-      if (!src.startsWith("data:image/")) return null;
-      if (src.length > LIMITS.MAX_IMAGE_BYTES) return null;
+      const isData = src.startsWith("data:image/") && src.length <= LIMITS.MAX_IMAGE_BYTES;
+      const isAsset = /^\/api\/workspaces\/[\w-]+\/assets\/[\w-]+$/.test(src);
+      if (!isData && !isAsset) return null;
       data = { src };
+      break;
+    }
+    case "comment": {
+      const text = typeof obj.data?.text === "string" ? obj.data.text.slice(0, LIMITS.MAX_COMMENT_BODY) : "";
+      const resolved = obj.data?.resolved === true;
+      const rawThread = Array.isArray(obj.data?.thread) ? obj.data.thread : [];
+      const thread = rawThread
+        .slice(0, LIMITS.MAX_THREAD_ENTRIES)
+        .map((t) => ({
+          id: typeof t?.id === "string" ? t.id.slice(0, 64) : "",
+          authorId: typeof t?.authorId === "string" ? t.authorId.slice(0, 64) : "",
+          authorName: typeof t?.authorName === "string" ? t.authorName.slice(0, 64) : "",
+          body: typeof t?.body === "string" ? t.body.slice(0, LIMITS.MAX_COMMENT_BODY) : "",
+          at: typeof t?.at === "number" && isFinite(t.at) ? t.at : 0,
+        }))
+        .filter((t) => t.id && t.body);
+      data = { text, resolved, thread };
+      break;
+    }
+    case "frame": {
+      const title = typeof obj.data?.title === "string" ? obj.data.title.slice(0, 200) : "Frame";
+      data = { title };
       break;
     }
     case "connector": {
@@ -233,7 +298,7 @@ export function normalizeObjectPayload(obj) {
       return null;
   }
 
-  return { x, y, w, h, rot, style, data };
+  return { x, y, w, h, rot, style, data, groupId };
 }
 
 export function newObjectId() {
@@ -242,6 +307,12 @@ export function newObjectId() {
     Date.now().toString(36) +
     Math.random().toString(36).slice(2, 10)
   );
+}
+
+// Stable id for one comment-thread entry. The client generates it so its
+// optimistic echo and the server copy share the same React key.
+export function newCommentEntryId() {
+  return "c_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 // Validate a virtual-file-system path (shared by REST API + execution).

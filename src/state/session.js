@@ -16,7 +16,7 @@ export const useSession = create((set, get) => ({
 
   setView: (view) => set({ view }),
   setUser: (user) => {
-    set({ user, view: user ? (get().view === "auth" || get().view === "loading" ? "dashboard" : get().view) : "auth" });
+    set({ user, view: user ? (get().view === "auth" || get().view === "loading" ? "dashboard" : get().view) : "landing" });
     try {
       const s = getSocket();
       if (user) {

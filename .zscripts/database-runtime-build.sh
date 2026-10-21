@@ -21,7 +21,7 @@ fi
 echo "🗄️  同步构建产物中的数据库结构..."
 (
     cd "$PROJECT_DIR"
-    DATABASE_URL="file:$TARGET_DB_PATH" bun run db:push
+    DATABASE_URL="file:$TARGET_DB_PATH" npm run db:push
 )
 
 if [ ! -f "$TARGET_DB_PATH" ]; then

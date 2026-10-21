@@ -2,8 +2,8 @@
 // SQLite access for the collaboration service.
 // Uses node:sqlite (built into Node 22+) — zero native deps.
 //
-// Shares the SAME database file with the Next.js/Prisma side:
-//   - Next.js (Prisma) owns:  users, sessions, workspaces,
+// Shares the SAME database file with the Node.js/Prisma side:
+//   - Node.js (Prisma) owns:  users, sessions, workspaces,
 //                             workspace_members, documents CRUD
 //   - this service owns:      workspace_state, canvas_objects,
 //                             operations, document_operations, snapshots

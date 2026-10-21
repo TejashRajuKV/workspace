@@ -14,16 +14,26 @@ import { worldToScreen, screenToWorld } from "./camera";
 import { objectBounds } from "@/shared/canvasOps";
 import { connectorEndpoints, handlePositions, rotatePoint } from "./geometry";
 
-const BOARD_BG = "#f7f8fb";
-const GRID_DOT = "#d5dbe6";
-const SELECTION = "#10b981";
+const BOARD_BG = "#fff7ec";
+const GRID_DOT = "#ecd9c6";
+const SELECTION = "#e76f51";
 const HANDLE_FILL = "#ffffff";
 
 export function createRenderer(canvas, quad) {
-  const ctx = canvas.getContext("2d");
+  let ctx = canvas.getContext("2d");
   const imageCache = new Map(); // id → { img, src }
   const textCache = new Map(); // cacheKey → string[]
   let dpr = 1;
+
+  function withCtx(next, fn) {
+    const prev = ctx;
+    ctx = next;
+    try {
+      return fn();
+    } finally {
+      ctx = prev;
+    }
+  }
 
   function ensureImage(obj) {
     const src = obj.payload.data?.src;
@@ -76,18 +86,21 @@ export function createRenderer(canvas, quad) {
     }
 
     const fill = st.fill || "transparent";
-    const stroke = st.stroke || "#31405c";
+    const stroke = st.stroke || "#6b4a44";
     const sw = (st.strokeWidth != null ? st.strokeWidth : 2);
+    // dashed strokes are opt-in (dash = dash length in world units)
+    const applyDash = () => ctx.setLineDash(st.dash ? [st.dash, Math.max(2, st.dash * 0.7)] : []);
 
     switch (obj.type) {
       case "rectangle":
-        roundRect(p.x, p.y, p.w, p.h, 3);
+        roundRect(p.x, p.y, p.w, p.h, st.cornerRadius != null ? st.cornerRadius : 3);
         if (fill !== "transparent") {
           ctx.fillStyle = fill;
           ctx.fill();
         }
         ctx.strokeStyle = stroke;
         ctx.lineWidth = sw;
+        applyDash();
         ctx.stroke();
         break;
       case "ellipse":
@@ -99,6 +112,7 @@ export function createRenderer(canvas, quad) {
         }
         ctx.strokeStyle = stroke;
         ctx.lineWidth = sw;
+        applyDash();
         ctx.stroke();
         break;
       case "line": {
@@ -110,6 +124,7 @@ export function createRenderer(canvas, quad) {
         ctx.strokeStyle = stroke;
         ctx.lineWidth = sw;
         ctx.lineCap = "round";
+        applyDash();
         ctx.stroke();
         break;
       }
@@ -122,7 +137,9 @@ export function createRenderer(canvas, quad) {
         ctx.strokeStyle = stroke;
         ctx.lineWidth = sw;
         ctx.lineCap = "round";
+        applyDash();
         ctx.stroke();
+        ctx.setLineDash([]);
         arrowHead(p.x, p.y, x2, y2, Math.max(8, sw * 4));
         break;
       }
@@ -138,16 +155,17 @@ export function createRenderer(canvas, quad) {
           }
           const last = pts[pts.length - 1];
           ctx.lineTo(p.x + last[0], p.y + last[1]);
-          ctx.strokeStyle = st.stroke || "#1c2433";
+          ctx.strokeStyle = st.stroke || "#2a181d";
           ctx.lineWidth = sw;
           ctx.lineCap = "round";
           ctx.lineJoin = "round";
+          applyDash();
           ctx.stroke();
         }
         break;
       }
       case "text": {
-        ctx.fillStyle = st.color || "#1c2433";
+        ctx.fillStyle = st.color || "#2a181d";
         ctx.font = `${st.fontSize || 16}px ui-sans-serif, system-ui, sans-serif`;
         ctx.textAlign = st.align || "left";
         ctx.textBaseline = "top";
@@ -184,7 +202,7 @@ export function createRenderer(canvas, quad) {
           ctx.drawImage(img, p.x, p.y, p.w, p.h);
         } else {
           roundRect(p.x, p.y, p.w, p.h, 4);
-          ctx.fillStyle = "#e5eaf2";
+          ctx.fillStyle = "#f8e9d9";
           ctx.fill();
         }
         break;
@@ -197,9 +215,59 @@ export function createRenderer(canvas, quad) {
           ctx.lineTo(e.x2, e.y2);
           ctx.strokeStyle = stroke;
           ctx.lineWidth = Math.max(1.5, sw);
+          applyDash();
           ctx.stroke();
+          ctx.setLineDash([]);
           arrowHead(e.x1, e.y1, e.x2, e.y2, Math.max(8, sw * 4));
         }
+        break;
+      }
+      case "frame": {
+        // container: dashed border + a title label above the top-left corner
+        const lw = Math.max(1, 1.5 / zoom);
+        roundRect(p.x, p.y, p.w, p.h, 10 / zoom);
+        if (fill !== "transparent") {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
+        ctx.strokeStyle = st.stroke || "#c45a3c";
+        ctx.lineWidth = lw;
+        ctx.setLineDash([7 / zoom, 5 / zoom]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = st.stroke || "#c45a3c";
+        ctx.font = `600 ${Math.max(9, 12 / zoom)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(String(p.data?.title || "Frame").slice(0, 80), p.x + 3 / zoom, p.y - 5 / zoom);
+        break;
+      }
+      case "comment": {
+        const r = 14 / zoom;
+        const pinX = p.x + r;
+        const pinY = p.y + r;
+        const resolved = p.data?.resolved === true;
+        const color = resolved ? "#9ca3af" : "#e76f51";
+        ctx.beginPath();
+        ctx.moveTo(pinX - r * 0.38, pinY + r * 0.72);
+        ctx.lineTo(pinX, pinY + r * 1.55);
+        ctx.lineTo(pinX + r * 0.38, pinY + r * 0.72);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(pinX, pinY, r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2 / zoom;
+        ctx.stroke();
+        const count = Array.isArray(p.data?.thread) ? p.data.thread.length : 0;
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `700 ${Math.max(8, 13 / zoom)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(count ? String(count) : "+", pinX, pinY + 0.5 / zoom);
         break;
       }
       default:
@@ -260,6 +328,17 @@ export function createRenderer(canvas, quad) {
         Math.abs(e.x2 - e.x1) + 12,
         Math.abs(e.y2 - e.y1) + 12
       );
+      ctx.restore();
+      return;
+    }
+    if (obj.type === "comment") {
+      const r = 14 / camera.zoom;
+      ctx.save();
+      ctx.strokeStyle = SELECTION;
+      ctx.lineWidth = 1.5 / camera.zoom;
+      ctx.beginPath();
+      ctx.arc(p.x + r, p.y + r, r + 4 / camera.zoom, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
       return;
     }
@@ -336,7 +415,7 @@ export function createRenderer(canvas, quad) {
     const remoteSelColors = new Map();
     if (remoteSelections) {
       for (const [uid, ids] of remoteSelections) {
-        const color = cursors?.get(uid)?.color || "#8b5cf6";
+        const color = cursors?.get(uid)?.color || "#c45a3c";
         for (const id of ids) remoteSelColors.set(id, color);
       }
     }
@@ -405,8 +484,8 @@ export function createRenderer(canvas, quad) {
       const s1 = worldToScreen(cam, marquee.x, marquee.y);
       const sw2 = marquee.w * cam.zoom;
       const sh2 = marquee.h * cam.zoom;
-      ctx.fillStyle = "rgba(16,185,129,0.08)";
-      ctx.strokeStyle = "rgba(16,185,129,0.7)";
+      ctx.fillStyle = "rgba(231,111,81,0.10)";
+      ctx.strokeStyle = "rgba(231,111,81,0.75)";
       ctx.lineWidth = 1;
       ctx.fillRect(s1.x, s1.y, sw2, sh2);
       ctx.strokeRect(s1.x, s1.y, sw2, sh2);
@@ -442,5 +521,58 @@ export function createRenderer(canvas, quad) {
     return true;
   }
 
-  return { render, resize, dirty, markDirty: dirty };
+  // Preload every image referenced by `objectsArr` so a snapshot is not
+  // captured with placeholder rectangles.
+  async function preloadImages(objectsArr) {
+    const tasks = [];
+    for (const obj of objectsArr) {
+      const src = obj.payload?.data?.src;
+      if (!src) continue;
+      let entry = imageCache.get(obj.id);
+      if (!entry || entry.src !== src) {
+        const img = new Image();
+        img.src = src;
+        entry = { img, src };
+        imageCache.set(obj.id, entry);
+      }
+      if (!entry.img.complete || !entry.img.naturalWidth) {
+        tasks.push(
+          new Promise((resolve) => {
+            entry.img.onload = resolve;
+            entry.img.onerror = resolve;
+          })
+        );
+      }
+    }
+    await Promise.all(tasks);
+  }
+
+  // Render all objects onto an offscreen canvas (no grid, no selection UI).
+  function snapshot(objectsArr, bounds, scale = 2) {
+    const pad = 40;
+    const worldW = Math.max(1, bounds.w + pad * 2);
+    const worldH = Math.max(1, bounds.h + pad * 2);
+    const maxPx = 6000;
+    let px = Math.min(scale, maxPx / worldW, maxPx / worldH);
+    if (!isFinite(px) || px <= 0) px = 1;
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(worldW * px));
+    off.height = Math.max(1, Math.round(worldH * px));
+    const octx = off.getContext("2d");
+    const map = new Map(objectsArr.map((o) => [o.id, o]));
+    withCtx(octx, () => {
+      useObjectsRef.objects = map;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = BOARD_BG;
+      ctx.fillRect(0, 0, off.width, off.height);
+      ctx.scale(px, px);
+      ctx.translate(pad - bounds.x, pad - bounds.y);
+      const cam = { x: 0, y: 0, zoom: px };
+      const sorted = [...objectsArr].sort((a, b) => (a.z || 0) - (b.z || 0));
+      for (const obj of sorted) drawObject(obj, cam, new Set(), new Map());
+    });
+    return off;
+  }
+
+  return { render, resize, dirty, markDirty: dirty, snapshot, preloadImages };
 }

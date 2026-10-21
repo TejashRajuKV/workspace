@@ -3,8 +3,8 @@
 	 viewBox="0 0 30 30" style="enable-background:new 0 0 30 30;" xml:space="preserve">
 <defs>
   <style type="text/css">
-    .st194{fill:#2D2D2D;stroke:#FFFFFF;stroke-width:0.6317;stroke-miterlimit:10;}
-    .st23{fill:#FFFFFF;}
+    .st194{fill:#2a181d;stroke:#f6c177;stroke-width:0.6317;stroke-miterlimit:10;}
+    .st23{fill:#f6c177;}
 
     .z-breathe {
       animation: breathe 2.5s ease-in-out infinite;

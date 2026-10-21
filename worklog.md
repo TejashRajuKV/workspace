@@ -133,3 +133,25 @@ Fixed:
 
 UI: in-app confirm/prompt dialogs + toasts replace native alert/confirm/prompt (Feedback.jsx); copy-workspace-ID button; favicon (src/app/icon.svg); new files auto-open; style bar no longer overlaps the tool rail and scrolls on mobile; clearer empty states; auth tab styling.
 Lint (next/react-hooks) is clean; 25/25 tests pass; two-user E2E converges.
+
+---
+Task ID: 7
+Agent: main (Super Z)
+Task: Migrate the web app off Next.js 16 + Bun to plain Node.js + Vite
+
+Work Log:
+- Reason: this Next.js major has breaking changes vs. the scaffold's assumptions, and the API route/App Router layer was the only reason Bun existed in the stack. The realtime service was already plain Node, so the two runtimes could be collapsed into one.
+- Frontend: src/app/{page,layout}.js -> src/App.jsx + src/main.jsx, src/app/globals.css -> src/styles/globals.css, built by Vite (vite.config.js) into dist/client.
+- Backend: new server/index.js (plain node:http) serving the static SPA with history fallback + the REST API; route handlers moved from src/app/api/* to server/routes/* with server/middleware (sessions, rate limits) and server/lib (Prisma). Added GET /api/health.
+- Scripts/deps: package.json now uses npm run dev|build|start|lint|test; removed next, bun, related plugins; added vite, prisma, eslint stack. bun.lock deleted (both root and collab-service) in favour of package-lock.json.
+- Platform scripts rewritten: .zscripts/{build,start,mini-services-build,mini-services-start,python-runtime-build}.sh now use npm/node, package app-dist, export HOST/DATABASE_PATH/COLLAB_SERVICE_URL/INTERNAL_TOKEN. All 8 scripts pass bash -n.
+- Lint brought back to zero under the flat ESLint config (stale .next/ caused ~1740 phantom errors and was deleted): scoped no-control-regex exception for src/shared/protocol.js, react-hooks/exhaustive-deps off for parity with the old config, exhaustive-deps/set-state-in-effect handled at the two remaining call sites.
+- Hardening: safeDecode in server/index.js now returns 400 instead of throwing on malformed percent-encoding (verified: /%E0%A4%A -> 400); stale Next.js comments fixed in prisma/schema.prisma, mini-services/collab-service/{db,index}.js, src/shared/protocol.js; components.json CSS path corrected; README + docs/{architecture,database,api}.md rewritten for the Node topology.
+- Verified: npm run lint exit 0; npm test 25/25; npm run build OK; production server restart + scripts/smoke.js -> SMOKE PASS; /api/health returns {"ok":true,...} with collab reachable.
+- Note: postinstall: prisma generate was tried and removed — it fails whenever a running server holds Prisma's query-engine DLL; build.sh runs npm run db:generate explicitly instead, and @prisma/client already regenerates on install.
+- Environment gotcha: never edit UTF-8 files with PowerShell Get-Content/Set-Content — it mangles the existing Chinese text and adds a BOM. Use the file tools or Node (repair script: C:\Users\tejas\AppData\Local\Temp\opencode\fixz.mjs, restores from git cat-file).
+
+Stage Summary:
+- App runs on a single Node runtime: Vite SPA + node:http REST on :3000, collab service on :3003/:3004, one SQLite file in WAL mode.
+- Lint / tests / build / smoke all green; changes not yet committed.
+

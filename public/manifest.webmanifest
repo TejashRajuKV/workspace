@@ -1,0 +1,26 @@
+{
+  "name": "Infinite Workspace",
+  "short_name": "Workspace",
+  "description": "Real-time collaborative infinite whiteboard and code editor.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#170d12",
+  "theme_color": "#170d12",
+  "orientation": "any",
+  "categories": ["productivity", "developer"],
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/landing-sunset.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

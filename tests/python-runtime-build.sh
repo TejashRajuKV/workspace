@@ -11,7 +11,7 @@ BUILD_DIR="$TEST_ROOT/build"
 mkdir -p \
     "$PROJECT_DIR/scripts" \
     "$PROJECT_DIR/.venv" \
-    "$BUILD_DIR/next-service-dist"
+    "$BUILD_DIR/app-dist"
 
 cat >"$PROJECT_DIR/requirements.txt" <<'EOF'
 EOF
@@ -25,12 +25,12 @@ EOF
 PROJECT_DIR="$PROJECT_DIR" BUILD_DIR="$BUILD_DIR" \
     bash "$SCRIPT_DIR/python-runtime-build.sh"
 
-test -f "$BUILD_DIR/next-service-dist/scripts/report.py"
-test ! -e "$BUILD_DIR/next-service-dist/.venv/should-not-copy.py"
+test -f "$BUILD_DIR/app-dist/scripts/report.py"
+test ! -e "$BUILD_DIR/app-dist/.venv/should-not-copy.py"
 
 PYPROJECT_DIR="$TEST_ROOT/pyproject-app"
 PYPROJECT_BUILD="$TEST_ROOT/pyproject-build"
-mkdir -p "$PYPROJECT_DIR" "$PYPROJECT_BUILD/next-service-dist"
+mkdir -p "$PYPROJECT_DIR" "$PYPROJECT_BUILD/app-dist"
 cat >"$PYPROJECT_DIR/pyproject.toml" <<'EOF'
 [project]
 name = "deploy-test"
@@ -44,7 +44,7 @@ EOF
 
 PROJECT_DIR="$PYPROJECT_DIR" BUILD_DIR="$PYPROJECT_BUILD" \
     bash "$SCRIPT_DIR/python-runtime-build.sh"
-test -f "$PYPROJECT_BUILD/next-service-dist/app.py"
+test -f "$PYPROJECT_BUILD/app-dist/app.py"
 test -f "$PYPROJECT_BUILD/python-runtime/requirements.txt"
 
 NODE_ONLY_PROJECT="$TEST_ROOT/node-only"

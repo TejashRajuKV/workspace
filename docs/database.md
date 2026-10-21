@@ -1,8 +1,9 @@
 # Database Design
 
-Single SQLite file (`db/custom.db`), **WAL mode**, shared by two runtimes:
+Single SQLite file (`db/custom.db`), **WAL mode**, shared by two Node
+processes:
 
-- **Next.js / Prisma** — schema owner (`prisma/schema.prisma`), handles
+- **web server / Prisma** — schema owner (`prisma/schema.prisma`), handles
   identity, workspace metadata and the virtual file system.
 - **Collaboration service / `node:sqlite`** — raw SQL for the hot path; owns
   the materialized canvas state, both operation logs and snapshots.
@@ -13,17 +14,41 @@ and all connections set `busy_timeout=5000`.
 
 ## Tables
 
-### Identity & metadata (written by Next.js)
+### Identity & metadata (written by the web server)
 
 ```sql
 users              (id, username UNIQUE, password_hash, color, created_at)
 sessions           (id = 64-hex token PK, user_id, expires_at, created_at)
-workspaces         (id, name, description, owner_id, created_at, updated_at)
+workspaces         (id, name, description, owner_id, allow_id_join,
+                    archived_at, created_at, updated_at)
 workspace_members  (id, workspace_id, user_id, role, joined_at,
                     UNIQUE(workspace_id, user_id))   -- role: owner|editor|viewer
+workspace_invites  (id, workspace_id, code UNIQUE /* hashed */, role,
+                    created_by, expires_at, max_uses, uses, revoked, created_at)
 documents          (id, workspace_id, path, is_folder, content,
                     doc_version, created_by, created_at, updated_at, deleted,
-                    UNIQUE(workspace_id, path))
+                    deleted_at, UNIQUE(workspace_id, path))
+document_snapshots (id AUTOINC, document_id, workspace_id, version, content,
+                    created_at, UNIQUE(document_id, version))
+github_links       (id, workspace_id UNIQUE, owner, repo, branch,
+                    token_cipher, token_iv, token_tag, last_commit_sha,
+                    last_pushed_at, created_at, updated_at)
+assets             (id, workspace_id, filename, mime, bytes, path,
+                    created_by, created_at)
+workspace_templates(id, name, description, created_by, payload JSON, created_at)
+share_links        (id, workspace_id, token_hash UNIQUE, role, created_by,
+                    expires_at, revoked, created_at)
+notifications      (id, user_id, workspace_id, type, title, body, link_type,
+                    link_id, actor_id, read_at, created_at)
+webhooks           (id, workspace_id, url, secret /* hashed */, events,
+                    enabled, created_by, created_at)
+webhook_deliveries (id AUTOINC, webhook_id, workspace_id, event, payload,
+                    status, attempts, next_attempt_at, last_status, last_error,
+                    created_at, delivered_at)
+scheduled_jobs     (id, workspace_id, kind, interval_ms, enabled, last_run_at,
+                    next_run_at, last_error, created_by, created_at)
+automation_rules   (id, workspace_id, name, trigger, action, config JSON,
+                    enabled, created_by, created_at)
 ```
 
 `documents` is the virtual file system: folders end with `/`, `content` holds
@@ -79,3 +104,24 @@ snapshots          (id AUTOINC, workspace_id, version, state JSON, created_at)
   realtime tables; Prisma never writes them (it only reads `canvas_objects`
   state via the service, and `documents` content is written by both sides on
   disjoint concerns: CRUD vs content).
+- **Trash is a timestamp, not a table**: `documents.deleted = 1` +
+  `deleted_at` (0 for rows soft-deleted before the column existed; the UI
+  renders those as "—"). Restore flips the flag for the whole path subtree;
+  purge deletes the rows.
+- **Only hashes on disk for bearer secrets**: `workspace_invites.code`,
+  `share_links.token_hash` and `webhooks.secret` store SHA-256 hashes
+  (plaintext is shown once at creation). GitHub PATs must stay usable, so they
+  are stored as AES-256-GCM ciphertext (`token_cipher/iv/tag`, key from
+  `GITHUB_TOKEN_KEY`) instead.
+- **Templates are snapshots, not references**: `workspace_templates.payload`
+  freezes `{files:[{path,isFolder,content}], canvas:[{type,z,payload}]}` so a
+  template keeps working after the source workspace changes or is deleted.
+- **Assets live on disk, rows in SQLite**: `assets.path` points under
+  `db/uploads/<workspaceId>/`; the board stores only the stable
+  `/api/workspaces/:id/assets/:assetId` URL. Deleting a workspace removes both.
+- **Notifications are per-user rows** (`user_id`, `read_at`) with an index on
+  `(user_id, read_at, created_at)`; fan-out happens in the web server, the
+  realtime service only tells it *what* happened.
+- **Automation state is derived from deliveries**: a webhook's health is the
+  counts of `webhook_deliveries` by status; `scheduled_jobs.next_run_at` lets
+  the ticker pick due jobs with one indexed query.
