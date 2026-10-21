@@ -2,7 +2,7 @@
 // Collaboration service — Socket.IO server (port 3003).
 //
 // Reached by browsers through the gateway as:  io('/?XTransformPort=3003')
-// Reached by the Next.js server internally as: http://127.0.0.1:3003/internal/*
+// Reached by the web server internally as: http://127.0.0.1:3004/internal/*
 //
 // Identity: the session token arrives in handshake.auth.token and is verified
 // against the sessions table. The client NEVER gets to claim a userId.
@@ -27,6 +27,7 @@ import {
   getDocState,
   openDoc,
   invalidateDoc,
+  replaceDocContent,
 } from "./docSync.js";
 import {
   bindPresence,
@@ -35,11 +36,11 @@ import {
   updatePresence,
   presenceSnapshot,
 } from "./presence.js";
-import { startExecution } from "./execution.js";
+import { startExecution, cancelExecution, sendExecutionInput, listRuns } from "./execution.js";
 import { LIMITS, opSummary } from "../../src/shared/protocol.js";
 
 const PORT = Number(process.env.PORT || 3003);
-const INTERNAL_PORT = Number(process.env.INTERNAL_PORT || 3004); // localhost-only, for the Next.js server
+const INTERNAL_PORT = Number(process.env.INTERNAL_PORT || 3004); // localhost-only, for the web server
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || (process.env.NODE_ENV === "production" ? "" : "iw-internal-token");
 
 if (process.env.NODE_ENV === "production" && INTERNAL_TOKEN.length < 32) {
@@ -92,6 +93,13 @@ async function handleInternal(req, body) {
     io.to(`ws:${workspaceId}`).emit("fs:changed", { kind: kind || "changed" });
     return { ok: true };
   }
+  if (req.url === "/internal/replace-doc") {
+    const { workspaceId, documentId, content, byUserId } = payload;
+    if (!workspaceId || !documentId) throw new Error("workspaceId and documentId required");
+    const result = replaceDocContent(io, documentId, workspaceId, content, byUserId || "system");
+    if (result.error) return result;
+    return { ok: true, ...result };
+  }
   if (req.url === "/internal/restore") {
     const { workspaceId, version, byUserId, byName } = payload;
     if (!workspaceId || !workspaceExists(workspaceId))
@@ -104,6 +112,40 @@ async function handleInternal(req, body) {
       opsApplied: result.opsApplied,
     });
     return result;
+  }
+  if (req.url === "/internal/notify") {
+    const { userId, notification } = payload;
+    if (!userId) throw new Error("userId required");
+    io.to(`user:${userId}`).emit("notification:new", notification);
+    return { ok: true };
+  }
+  if (req.url === "/internal/broadcast") {
+    const { workspaceId, event, payload: data } = payload;
+    if (!workspaceId || !event) throw new Error("workspaceId and event required");
+    io.to(`ws:${workspaceId}`).emit(String(event).slice(0, 64), data || {});
+    return { ok: true };
+  }
+  if (req.url === "/internal/seed-canvas") {
+    const { workspaceId, byUserId, objects } = payload;
+    if (!workspaceId || !workspaceExists(workspaceId)) throw new Error("workspace not found");
+    const list = Array.isArray(objects) ? objects.slice(0, 1000) : [];
+    const ops = list.map((o, i) => ({
+      id: `seed_${i}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "create",
+      oid: "",
+      p: {
+        object: {
+          id: o.id || `obj_seed_${i}_${Math.random().toString(36).slice(2, 8)}`,
+          type: o.type,
+          z: typeof o.z === "number" ? o.z : i,
+          payload: o.payload || {},
+        },
+      },
+    }));
+    if (ops.length) {
+      processCanvasOps(io, { data: { userId: byUserId || "system" }, emit: () => {} }, workspaceId, ops);
+    }
+    return { ok: true, seeded: ops.length };
   }
   throw new Error("unknown internal endpoint");
 }
@@ -161,6 +203,7 @@ function consume(limiter, kind, cost = 1) {
 
 io.on("connection", (socket) => {
   let joinedRoom = null;
+  socket.join(`user:${socket.data.userId}`);
 
   socket.on("ws:join", ({ workspaceId } = {}, cb) => {
     try {
@@ -321,6 +364,10 @@ io.on("connection", (socket) => {
         offset: typeof patch.editor.offset === "number" ? patch.editor.offset : 0,
         anchor: typeof patch.editor.anchor === "number" ? patch.editor.anchor : 0,
       };
+    if (patch.status === "active" || patch.status === "idle" || patch.status === "away")
+      clean.status = patch.status;
+    if (typeof patch.activity === "string") clean.activity = patch.activity.slice(0, 120);
+    if (typeof patch.typing === "boolean") clean.typing = patch.typing;
     updatePresence(`ws:${joinedRoom}`, socket.id, clean);
   });
 
@@ -333,6 +380,27 @@ io.on("connection", (socket) => {
     if (typeof fileId !== "string") return ack(cb, { error: "bad fileId" });
     const res = startExecution(io, socket, joinedRoom, { fileId, language });
     ack(cb, res);
+  });
+
+  socket.on("exec:cancel", ({ runId } = {}, cb) => {
+    if (!joinedRoom) return ack(cb, { error: "join a workspace first" });
+    const role = getRole(joinedRoom, socket.data.userId);
+    if (role !== "owner" && role !== "editor")
+      return ack(cb, { error: "viewers cannot run code" });
+    ack(cb, cancelExecution(socket, runId));
+  });
+
+  socket.on("exec:input", ({ runId, data } = {}, cb) => {
+    if (!joinedRoom) return ack(cb, { error: "join a workspace first" });
+    const role = getRole(joinedRoom, socket.data.userId);
+    if (role !== "owner" && role !== "editor")
+      return ack(cb, { error: "viewers cannot run code" });
+    ack(cb, sendExecutionInput(socket, runId, data));
+  });
+
+  socket.on("exec:history", ({ fileId } = {}, cb) => {
+    if (!joinedRoom) return ack(cb, { error: "join a workspace first" });
+    ack(cb, { runs: listRuns(joinedRoom, fileId) });
   });
 
   socket.on("disconnect", () => {

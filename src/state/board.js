@@ -18,6 +18,7 @@ export const boardRefs = {
   fullRebuild: false, // quadtree rebuild flag (reconnect/bootstrap)
   renderTick: 0, // bumped whenever non-object visuals change (presence,
   // remote selections, restores) → the render loop repaints
+  renderer: null, // set by CanvasBoard: exposes snapshot() for board export
 };
 
 let bound = false;
@@ -49,6 +50,9 @@ export const useBoard = create((set, get) => ({
   historyTick: 0,
   peerCount: 0,
   onlineUsers: [], // users currently present in the room (from presence:state)
+  presenceByUser: new Map(), // userId → { status, activity, typing, editor, view }
+  commentsOpen: false,
+  activeCommentId: null,
 
   // ---------------- lifecycle ----------------
   reset() {
@@ -67,6 +71,9 @@ export const useBoard = create((set, get) => ({
       history: { undo: [], redo: [] },
       peerCount: 0,
       onlineUsers: [],
+      presenceByUser: new Map(),
+      commentsOpen: false,
+      activeCommentId: null,
       connection: "connecting",
     });
   },
@@ -81,6 +88,9 @@ export const useBoard = create((set, get) => ({
       members: members || [],
       peerCount: peers?.length || 0,
       objectCountTick: get().objectCountTick + 1,
+      // never let an undo step from a previous workspace leak into this one
+      history: { undo: [], redo: [] },
+      historyTick: get().historyTick + 1,
     });
   },
 
@@ -107,7 +117,19 @@ export const useBoard = create((set, get) => ({
     }
     if (!prepared.length) return;
 
-    const history = { undo: [...s.history.undo, ...entries], redo: [] };
+    // One user action = one undo step. A batch that touches several objects
+    // (duplicate, paste, multi-delete, multi-select move) is stored as a single
+    // compound entry so one undo reverts the whole action at once.
+    let steps = entries;
+    if (entries.length > 1) {
+      steps = [
+        {
+          apply: entries.map((e) => e.apply),
+          inverse: entries.map((e) => e.inverse).reverse(),
+        },
+      ];
+    }
+    const history = { undo: [...s.history.undo, ...steps], redo: [] };
     if (history.undo.length > 300) history.undo.splice(0, history.undo.length - 300);
 
     set({
@@ -156,6 +178,12 @@ export const useBoard = create((set, get) => ({
   setClipboard: (clipboard) => set({ clipboard }),
   resetHistory: () => set({ history: { undo: [], redo: [] }, historyTick: get().historyTick + 1 }),
 
+  // ---------------- comments ----------------
+  openComment: (id) => set({ commentsOpen: true, activeCommentId: id || null }),
+  closeComments: () => set({ commentsOpen: false, activeCommentId: null }),
+  toggleComments: () => set((s) => ({ commentsOpen: !s.commentsOpen })),
+  setActiveComment: (id) => set({ activeCommentId: id || null }),
+
   // Push a history entry for an op that was already applied incrementally
   // during a drag (the drag emitted throttled partial ops without history).
   pushHistoryEntry(entry) {
@@ -189,14 +217,23 @@ export const useBoard = create((set, get) => ({
   },
 }));
 
-// Submit without touching history (undo/redo themselves).
-function submitDirect(op) {
+// Submit without touching history (undo/redo themselves). Accepts a single op
+// or an array (compound history entries expand to one op per affected object).
+function submitDirect(input) {
   const s = useBoard.getState();
-  if (!s.wsId || s.role === "viewer" || !op) return;
-  const ok = applyCanvasOp(s.objects, op, s.me?.id || "me", Date.now());
-  if (!ok) return;
+  if (!s.wsId || s.role === "viewer" || !input) return;
+  const ops = Array.isArray(input) ? input : [input];
+  const prepared = [];
+  for (const op of ops) {
+    if (!op) continue;
+    const ok = applyCanvasOp(s.objects, op, s.me?.id || "me", Date.now());
+    if (!ok) continue;
+    boardRefs.changedIds.add(op.oid);
+    prepared.push({ id: newClientId(), op });
+  }
+  if (!prepared.length) return;
   useBoard.setState({
-    pending: [...s.pending, { id: newClientId(), op }],
+    pending: [...s.pending, ...prepared],
     objectCountTick: s.objectCountTick + 1,
   });
   flushPending();
@@ -363,10 +400,18 @@ export function bindBoardSocket() {
     boardRefs.remoteSelections.clear();
     let count = 0;
     const online = new Map(); // userId → user (deduped across tabs)
+    const byUser = new Map(); // userId → presence record (status/activity/typing/editor)
     for (const rec of Object.values(users)) {
       if (!rec?.user) continue;
       count++;
       online.set(rec.user.id, rec.user);
+      byUser.set(rec.user.id, {
+        status: rec.status || "active",
+        activity: rec.activity || "",
+        typing: !!rec.typing,
+        editor: rec.editor || null,
+        view: rec.view || "board",
+      });
       if (me && rec.user.id === me.id) continue;
       const sid = rec.user.id;
       boardRefs.cursors.set(sid, {
@@ -379,7 +424,11 @@ export function bindBoardSocket() {
       if (rec.selection?.length) boardRefs.remoteSelections.set(sid, rec.selection);
     }
     boardRefs.renderTick += 1; // remote cursors/selections → repaint
-    useBoard.setState({ peerCount: Math.max(0, count - (me ? 1 : 0)), onlineUsers: [...online.values()] });
+    useBoard.setState({
+      peerCount: Math.max(0, count - (me ? 1 : 0)),
+      onlineUsers: [...online.values()],
+      presenceByUser: byUser,
+    });
   });
 
   on("ws:restored", ({ toVersion, by }) => {

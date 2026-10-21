@@ -9,8 +9,10 @@
 // applied. Returns { apply, inverse } or null.
 
 import { OP } from "@/shared/protocol";
-import { cloneObject } from "@/shared/canvasOps";
+import { cloneObject, makeStyle } from "@/shared/canvasOps";
 import { hitTestObject } from "./geometry";
+
+const STYLE_DEFAULTS = makeStyle();
 
 export function buildHistoryEntry(objects, op) {
   switch (op.type) {
@@ -59,9 +61,16 @@ export function buildHistoryEntry(objects, op) {
     case OP.STYLE: {
       const rec = objects.get(op.oid);
       if (!rec) return null;
+      const oldStyle = cloneObject(rec).payload.style || {};
+      // STYLE merges, so restoring only the keys that existed would leave a
+      // newly-added field (e.g. dash) behind. Reset added keys to defaults.
+      const inverseStyle = { ...STYLE_DEFAULTS, ...oldStyle };
+      for (const key of Object.keys(op.p?.style || {})) {
+        if (!(key in oldStyle)) inverseStyle[key] = STYLE_DEFAULTS[key];
+      }
       return {
         apply: op,
-        inverse: { type: OP.STYLE, oid: op.oid, p: { style: cloneObject(rec).payload.style } },
+        inverse: { type: OP.STYLE, oid: op.oid, p: { style: inverseStyle } },
       };
     }
     case OP.TEXT: {
@@ -79,6 +88,30 @@ export function buildHistoryEntry(objects, op) {
         apply: op,
         inverse: { type: OP.ZORDER, oid: op.oid, p: { z: rec.z } },
       };
+    }
+    case OP.GROUP: {
+      const rec = objects.get(op.oid);
+      if (!rec) return null;
+      return {
+        apply: op,
+        inverse: { type: OP.GROUP, oid: op.oid, p: { groupId: rec.payload.groupId || "" } },
+      };
+    }
+    case OP.COMMENT: {
+      const rec = objects.get(op.oid);
+      if (!rec) return null;
+      const d = rec.payload.data || {};
+      if (op.p.action === "resolve")
+        return {
+          apply: op,
+          inverse: { type: OP.COMMENT, oid: op.oid, p: { action: "resolve", resolved: d.resolved === true } },
+        };
+      if (op.p.action === "edit")
+        return {
+          apply: op,
+          inverse: { type: OP.COMMENT, oid: op.oid, p: { action: "edit", text: d.text || "" } },
+        };
+      return null; // replies are append-only
     }
     default:
       return null;

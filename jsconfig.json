@@ -5,6 +5,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.js", "src/**/*.jsx", ".next/types/**/*.js"],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*.js", "src/**/*.jsx", "server/**/*.js", "vite.config.js"],
+  "exclude": ["node_modules", "dist"]
 }

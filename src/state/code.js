@@ -219,6 +219,14 @@ export const useCode = create((set, get) => ({
 
   bumpTick: () => set({ fsTick: get().fsTick + 1 }),
 
+  // Materialise the OT state for a document without opening a tab — used by
+  // cross-file operations (e.g. find & replace) that edit docs the user has
+  // not opened yet.
+  seedDocState(docId) {
+    const doc = get().docs.find((d) => d.id === docId);
+    if (doc && !docStates.has(docId)) getState(docId, doc.content || "", doc.docVersion || 0);
+  },
+
   // ---- OT pipeline ----
   // Called by the editor binding for LOCAL edits (already applied in Monaco).
   submitLocal(docId, op) {

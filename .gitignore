@@ -13,8 +13,8 @@ node_modules
 # testing
 /coverage
 
-# next.js
-/.next/
+# build output
+/dist/
 /out/
 
 # production
@@ -39,7 +39,6 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 local-*
 .claude
 .z-ai-config

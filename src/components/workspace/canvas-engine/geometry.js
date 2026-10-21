@@ -64,6 +64,28 @@ export function hitTestObject(obj, wx, wy, tol, objects) {
       if (!e) return false;
       return distToSegment(lx, ly, e.x1, e.y1, e.x2, e.y2) <= tol + 6;
     }
+    case "comment": {
+      // pins are drawn at a constant screen size (14px), so the world-space
+      // radius scales with 1/zoom — approximate from the passed tolerance
+      const r = tol > 0 ? tol * (14 / 6) : 14;
+      const cx = p.x + r;
+      const cy = p.y + r;
+      return Math.hypot(lx - cx, ly - cy) <= r + tol;
+    }
+    case "frame": {
+      // frames are containers: only the border/title acts as a grab handle so
+      // clicks inside still reach the objects on top of them
+      const inside =
+        lx >= p.x - tol && lx <= p.x + p.w + tol && ly >= p.y - tol && ly <= p.y + p.h + tol;
+      if (!inside) return false;
+      const onBorder = !(
+        lx > p.x + tol &&
+        lx < p.x + p.w - tol &&
+        ly > p.y + tol &&
+        ly < p.y + p.h - tol
+      );
+      return onBorder;
+    }
     default:
       return false;
   }

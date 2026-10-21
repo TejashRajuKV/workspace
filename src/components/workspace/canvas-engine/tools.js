@@ -15,11 +15,20 @@ import { makeStyle, applyCanvasOp, objectBounds } from "@/shared/canvasOps";
 import { screenToWorld, zoomCameraAt, panCamera } from "./camera";
 import { hitTestObject, handlePositions, rotatePoint, simplifyPoints, rectIntersectsRect } from "./geometry";
 import { buildHistoryEntry } from "./history";
+import { keyToTool } from "@/lib/shortcuts";
 
 const DRAG_EMIT_MS = 50;
 
+// user-customizable tool keys (cached; refreshed on the change event below)
+let TOOL_KEYS = keyToTool();
+try {
+  window.addEventListener("iw-shortcuts-changed", () => {
+    TOOL_KEYS = keyToTool();
+  });
+} catch {}
+
 export function createInteractions(canvas, engine) {
-  const { quad, renderer, onEditObject, onNewText } = engine;
+  const { quad, renderer, onEditObject, onNewText, onOpenComment } = engine;
 
   let mode = null; // pan|marquee|move|resize|rotate|draw|freehand|connect|erase
   let startWorld = null;
@@ -66,6 +75,65 @@ export function createInteractions(canvas, engine) {
     let max = 0;
     for (const o of store().objects.values()) if ((o.z || 0) > max) max = o.z || 0;
     return max + 1;
+  }
+
+  function frameZ() {
+    let min = Infinity;
+    for (const o of store().objects.values()) if ((o.z || 0) < min) min = o.z || 0;
+    return (isFinite(min) ? min : 0) - 1;
+  }
+
+  // Selecting one member of a group selects the whole group (whiteboard idiom).
+  function withGroupExpand(ids) {
+    const s = store();
+    const gids = new Set();
+    for (const id of ids) {
+      const g = s.objects.get(id)?.payload?.groupId;
+      if (g) gids.add(g);
+    }
+    if (!gids.size) return ids;
+    const out = new Set(ids);
+    for (const o of s.objects.values()) {
+      if (o.payload?.groupId && gids.has(o.payload.groupId)) out.add(o.id);
+    }
+    return [...out];
+  }
+
+  function groupSelection() {
+    const s = store();
+    if (s.role === "viewer" || s.selection.length < 2) return;
+    const gid = "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const ops = [];
+    const entries = [];
+    for (const id of s.selection) {
+      const op = { type: OP.GROUP, oid: id, p: { groupId: gid } };
+      const entry = buildHistoryEntry(s.objects, op);
+      ops.push(op);
+      if (entry) entries.push(entry);
+    }
+    s.submitOps(ops, entries);
+  }
+
+  function ungroupSelection() {
+    const s = store();
+    if (s.role === "viewer") return;
+    const gids = new Set();
+    for (const id of s.selection) {
+      const g = s.objects.get(id)?.payload?.groupId;
+      if (g) gids.add(g);
+    }
+    if (!gids.size) return;
+    const ops = [];
+    const entries = [];
+    for (const o of s.objects.values()) {
+      if (o.payload?.groupId && gids.has(o.payload.groupId)) {
+        const op = { type: OP.GROUP, oid: o.id, p: { groupId: "" } };
+        const entry = buildHistoryEntry(s.objects, op);
+        ops.push(op);
+        if (entry) entries.push(entry);
+      }
+    }
+    if (ops.length) s.submitOps(ops, entries);
   }
 
   function markChanged(id) {
@@ -139,12 +207,13 @@ export function createInteractions(canvas, engine) {
       }
       const hit = hitAt(world.x, world.y);
       if (hit) {
+        const groupIds = withGroupExpand([hit.id]);
         if (e.shiftKey) {
-          if (sel.has(hit.id)) sel.delete(hit.id);
-          else sel.add(hit.id);
+          if (sel.has(hit.id)) groupIds.forEach((g) => sel.delete(g));
+          else groupIds.forEach((g) => sel.add(g));
         } else if (!sel.has(hit.id)) {
           sel.clear();
-          sel.add(hit.id);
+          groupIds.forEach((g) => sel.add(g));
         }
         s.setSelection([...sel]);
         sendPresence({ selection: [...sel] });
@@ -194,7 +263,34 @@ export function createInteractions(canvas, engine) {
       return;
     }
 
-    if (["rectangle", "ellipse", "line", "arrow", "sticky"].includes(tool)) {
+    if (tool === "comment") {
+      const hit = hitAt(world.x, world.y);
+      if (hit && hit.type === "comment") {
+        onOpenComment?.({ objId: hit.id });
+        mode = null;
+        return;
+      }
+      const id = newObjectId();
+      const r = 14 / s.camera.zoom;
+      const payload = {
+        x: world.x - r,
+        y: world.y - r,
+        w: r * 2,
+        h: r * 2,
+        rot: 0,
+        style: makeStyle({ fill: "transparent", stroke: "#e76f51", strokeWidth: 0 }),
+        data: { text: "", resolved: false, thread: [] },
+      };
+      submit(
+        { type: OP.CREATE, oid: id, p: { object: { id, type: "comment", payload, z: nextZ() } } },
+        true
+      );
+      onOpenComment?.({ objId: id });
+      mode = null;
+      return;
+    }
+
+    if (["rectangle", "ellipse", "line", "arrow", "sticky", "frame"].includes(tool)) {
       mode = "draw";
       renderer?.markDirty?.();
       return;
@@ -236,7 +332,7 @@ export function createInteractions(canvas, engine) {
       w: 1,
       h: 1,
       rot: 0,
-      style: makeStyle({ stroke: "#64748b", strokeWidth: 2 }),
+      style: makeStyle({ stroke: "#8a6a5f", strokeWidth: 2 }),
       data: {
         fromId: connectFrom,
         toId: toId,
@@ -449,11 +545,18 @@ export function createInteractions(canvas, engine) {
         const obj = s.objects.get(id);
         if (obj) {
           const r = { x: obj.payload.x, y: obj.payload.y, w: obj.payload.w, h: obj.payload.h };
-          const entry = {
-            apply: { type: OP.RESIZE, oid: id, p: r },
-            inverse: { type: OP.RESIZE, oid: id, p: resizeOrig.rect },
-          };
-          s.pushHistoryEntry(entry);
+          const o = resizeOrig.rect;
+          if (Math.abs(r.x - o.x) > 0.01 || Math.abs(r.y - o.y) > 0.01 ||
+              Math.abs(r.w - o.w) > 0.01 || Math.abs(r.h - o.h) > 0.01) {
+            // the throttled drag may have ended mid-interval — send the final
+            // absolute rect so collaborators (and reloads) get the true result
+            emitOnly({ type: OP.RESIZE, oid: id, p: r });
+            const entry = {
+              apply: { type: OP.RESIZE, oid: id, p: r },
+              inverse: { type: OP.RESIZE, oid: id, p: o },
+            };
+            s.pushHistoryEntry(entry);
+          }
         }
         break;
       }
@@ -461,11 +564,15 @@ export function createInteractions(canvas, engine) {
         const id = s.selection[0];
         const obj = s.objects.get(id);
         if (obj) {
-          const entry = {
-            apply: { type: OP.ROTATE, oid: id, p: { rot: obj.payload.rot || 0 } },
-            inverse: { type: OP.ROTATE, oid: id, p: { rot: rotateOrig.rot } },
-          };
-          s.pushHistoryEntry(entry);
+          const rot = obj.payload.rot || 0;
+          if (Math.abs(rot - rotateOrig.rot) > 0.001) {
+            emitOnly({ type: OP.ROTATE, oid: id, p: { rot } });
+            const entry = {
+              apply: { type: OP.ROTATE, oid: id, p: { rot } },
+              inverse: { type: OP.ROTATE, oid: id, p: { rot: rotateOrig.rot } },
+            };
+            s.pushHistoryEntry(entry);
+          }
         }
         break;
       }
@@ -480,8 +587,9 @@ export function createInteractions(canvas, engine) {
             const obj = s.objects.get(id);
             if (obj && rectIntersectsRect(objectBounds(obj), rect)) ids.push(id);
           }
-          s.setSelection(ids);
-          sendPresence({ selection: ids });
+          const expanded = withGroupExpand(ids);
+          s.setSelection(expanded);
+          sendPresence({ selection: expanded });
         } else {
           s.setSelection([]);
           sendPresence({ selection: [] });
@@ -533,12 +641,27 @@ export function createInteractions(canvas, engine) {
             w: Math.max(tiny ? 180 : w, 60),
             h: Math.max(tiny ? 180 : h, 60),
             rot: 0,
-            style: makeStyle({ ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#dbe4f0" ? "#fde047" : s.style.fill, color: "#3f3f1f", fontSize: 14, align: "left" }),
+            style: makeStyle({ ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#f6ddc0" ? "#f6c177" : s.style.fill, color: "#3a2118", fontSize: 14, align: "left" }),
             data: { text: "" },
           };
           const op = { type: OP.CREATE, oid: id, p: { object: { id, type: "sticky", payload, z: nextZ() } } };
           submit(op, true);
           onEditObject({ objId: id, kind: "sticky" });
+        } else if (tool === "frame") {
+          const id = newObjectId();
+          const payload = {
+            x: Math.min(a.x, b.x),
+            y: Math.min(a.y, b.y),
+            w: Math.max(tiny ? 360 : w, 40),
+            h: Math.max(tiny ? 240 : h, 40),
+            rot: 0,
+            style: makeStyle({ fill: "transparent", stroke: "#c45a3c", strokeWidth: 2 }),
+            data: { title: "Frame" },
+          };
+          submit(
+            { type: OP.CREATE, oid: id, p: { object: { id, type: "frame", payload, z: frameZ() } } },
+            true
+          );
         }
         // return to select after one shape (like most whiteboards)
         s.setTool("select");
@@ -565,7 +688,7 @@ export function createInteractions(canvas, engine) {
             w: Math.max(maxX - minX, 2),
             h: Math.max(maxY - minY, 2),
             rot: 0,
-            style: makeStyle({ ...s.style, fill: "transparent", strokeWidth: Math.max(2, s.style.strokeWidth) }),
+            style: makeStyle({ ...s.style, fill: "transparent", strokeWidth: Math.max(1, s.style.strokeWidth) }),
             data: { points: pts.map(([x, y]) => [x - minX, y - minY]) },
           };
           submit(
@@ -613,6 +736,10 @@ export function createInteractions(canvas, engine) {
   function onDoubleClick(e) {
     const world = evtWorld(e);
     const hit = hitAt(world.x, world.y);
+    if (hit && hit.type === "comment") {
+      onOpenComment?.({ objId: hit.id });
+      return;
+    }
     if (hit && (hit.type === "text" || hit.type === "sticky")) {
       onEditObject({ objId: hit.id, kind: hit.type });
     }
@@ -655,6 +782,17 @@ export function createInteractions(canvas, engine) {
       duplicateSelection();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+      e.preventDefault();
+      if (e.shiftKey) ungroupSelection();
+      else groupSelection();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "l") {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent("iw-toggle-layers"));
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       const clip = s.selection.map((id) => s.objects.get(id)).filter(Boolean);
       if (clip.length) s.setClipboard(clip.map((o) => JSON.parse(JSON.stringify({ type: o.type, payload: o.payload, z: o.z }))));
@@ -666,7 +804,18 @@ export function createInteractions(canvas, engine) {
     }
     if (e.key === "Delete" || e.key === "Backspace") {
       if (s.selection.length) {
-        for (const id of s.selection) submit({ type: OP.DELETE, oid: id, p: {} }, true);
+        // batch → a single undo restores every deleted object
+        const ops = [];
+        const entries = [];
+        for (const id of s.selection) {
+          const op = { type: OP.DELETE, oid: id, p: {} };
+          const entry = buildHistoryEntry(s.objects, op);
+          if (entry) {
+            ops.push(op);
+            entries.push(entry);
+          }
+        }
+        if (ops.length) s.submitOps(ops, entries);
         s.setSelection([]);
         sendPresence({ selection: [] });
       }
@@ -687,26 +836,22 @@ export function createInteractions(canvas, engine) {
       const step = e.shiftKey ? 10 : 1;
       const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
       const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      // one key press on a multi-selection = one undo step
+      const ops = [];
+      const entries = [];
       for (const id of s.selection) {
-        submit({ type: OP.MOVE, oid: id, p: { dx, dy } }, true);
+        const op = { type: OP.MOVE, oid: id, p: { dx, dy } };
+        const entry = buildHistoryEntry(s.objects, op);
+        if (entry) {
+          ops.push(op);
+          entries.push(entry);
+        }
       }
+      if (ops.length) s.submitOps(ops, entries);
       return;
     }
-    // tool shortcuts
-    const keyTools = {
-      v: "select",
-      h: "hand",
-      r: "rectangle",
-      o: "ellipse",
-      l: "line",
-      a: "arrow",
-      p: "freehand",
-      t: "text",
-      n: "sticky",
-      c: "connector",
-      e: "eraser",
-    };
-    const t = keyTools[e.key.toLowerCase()];
+    // tool shortcuts (user-remappable via src/lib/shortcuts.js)
+    const t = TOOL_KEYS[e.key.toLowerCase()];
     if (t && !e.ctrlKey && !e.metaKey && !e.altKey) {
       s.setTool(t);
       updateCursor();
@@ -782,11 +927,25 @@ export function createInteractions(canvas, engine) {
       const tool = s.tool;
       const a = startWorld;
       const b = lastWorld;
-      if (!a || !b || !["rectangle", "ellipse", "line", "arrow", "sticky"].includes(tool)) return null;
+      if (!a || !b || !["rectangle", "ellipse", "line", "arrow", "sticky", "frame"].includes(tool)) return null;
       if (tool === "line" || tool === "arrow") {
         return {
           type: tool,
           payload: { x: a.x, y: a.y, w: Math.abs(b.x - a.x) || 1, h: Math.abs(b.y - a.y) || 1, rot: 0, style: makeStyle({ ...s.style, fill: "transparent" }), data: { x2: b.x, y2: b.y } },
+        };
+      }
+      if (tool === "frame") {
+        return {
+          type: "frame",
+          payload: {
+            x: Math.min(a.x, b.x),
+            y: Math.min(a.y, b.y),
+            w: Math.max(Math.abs(b.x - a.x), 2),
+            h: Math.max(Math.abs(b.y - a.y), 2),
+            rot: 0,
+            style: makeStyle({ fill: "transparent", stroke: "#c45a3c", strokeWidth: 2 }),
+            data: { title: "Frame" },
+          },
         };
       }
       return {
@@ -797,7 +956,7 @@ export function createInteractions(canvas, engine) {
           w: Math.max(Math.abs(b.x - a.x), 2),
           h: Math.max(Math.abs(b.y - a.y), 2),
           rot: 0,
-          style: makeStyle(tool === "sticky" ? { ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#dbe4f0" ? "#fde047" : s.style.fill } : s.style),
+          style: makeStyle(tool === "sticky" ? { ...s.style, fill: s.style.fill === "transparent" || s.style.fill === "#f6ddc0" ? "#f6c177" : s.style.fill } : s.style),
           data: tool === "sticky" ? { text: "" } : {},
         },
       };
@@ -817,7 +976,7 @@ export function createInteractions(canvas, engine) {
         const fp = from.payload;
         return {
           type: "line",
-          payload: { x: fp.x + fp.w / 2, y: fp.y + fp.h / 2, w: 1, h: 1, rot: 0, style: makeStyle({ stroke: "#64748b", fill: "transparent" }), data: { x2: lastWorld.x, y2: lastWorld.y } },
+          payload: { x: fp.x + fp.w / 2, y: fp.y + fp.h / 2, w: 1, h: 1, rot: 0, style: makeStyle({ stroke: "#8a6a5f", fill: "transparent" }), data: { x2: lastWorld.x, y2: lastWorld.y } },
         };
       }
     }

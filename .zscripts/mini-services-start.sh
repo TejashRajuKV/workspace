@@ -41,6 +41,14 @@ cleanup() {
     echo "✅ 所有服务已关闭"
 }
 
+# 默认 SQLite 路径：与应用侧 DATABASE_URL 指向同一个文件。
+# 服务代码里 __dirname/../../db/custom.db 依赖源码目录结构，
+# 打包后的目录层级不同，所以必须显式注入。
+if [ -z "${DATABASE_PATH:-}" ]; then
+    DATABASE_PATH="/app/db/custom.db"
+fi
+export DATABASE_PATH
+
 main() {
     echo "🚀 开始启动所有 mini services..."
     
@@ -50,45 +58,32 @@ main() {
         return
     fi
     
-    # 查找所有 mini-service-*.js 文件
-    service_files=""
-    for file in "$DIST_DIR"/mini-service-*.js; do
-        if [ -f "$file" ]; then
-            if [ -z "$service_files" ]; then
-                service_files="$file"
-            else
-                service_files="$service_files $file"
-            fi
-        fi
-    done
-    
-    # 计算服务文件数量
+    # 查找已打包的服务目录（每个目录含 index.js 或 src/index.js）
     service_count=0
-    for file in $service_files; do
-        service_count=$((service_count + 1))
-    done
-    
-    if [ $service_count -eq 0 ]; then
-        echo "ℹ️  未找到任何 mini service 文件"
-        return
-    fi
-    
-    echo "📦 找到 $service_count 个服务，开始启动..."
-    echo ""
-    
-    # 启动每个服务
-    for file in $service_files; do
-        service_name=$(basename "$file" .js | sed 's/mini-service-//')
+    for dir in "$DIST_DIR"/mini-services/*/; do
+        [ -d "$dir" ] || continue
+
+        entry=""
+        for candidate in "$dir"src/index.js "$dir"index.js; do
+            if [ -f "$candidate" ]; then
+                entry="$candidate"
+                break
+            fi
+        done
+        [ -n "$entry" ] || continue
+
+        service_name=$(basename "$dir")
         echo "▶️  启动服务: $service_name..."
         
-        # 使用 bun 运行服务（后台运行）
-        bun "$file" &
+        # 使用 Node.js 运行服务（后台运行）
+        node "$entry" &
         pid=$!
         if [ -z "$pids" ]; then
             pids="$pid"
         else
             pids="$pids $pid"
         fi
+        service_count=$((service_count + 1))
         
         # 等待一小段时间检查进程是否成功启动
         sleep 0.5
@@ -100,6 +95,11 @@ main() {
             echo "✅ $service_name 已启动 (PID: $pid)"
         fi
     done
+    
+    if [ "$service_count" -eq 0 ]; then
+        echo "ℹ️  未找到任何已打包的 mini service"
+        return
+    fi
     
     # 计算运行中的服务数量
     running_count=0
@@ -120,4 +120,3 @@ main() {
 }
 
 main
-

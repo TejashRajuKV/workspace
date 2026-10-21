@@ -165,6 +165,75 @@ export function syncDoc(documentId, since) {
   };
 }
 
+// Replace a document's content wholesale (file import / version restore).
+// The change travels as a real operation so open editors stay in sync.
+export function replaceDocContent(io, documentId, room, content, userId) {
+  const s = loadDoc(documentId);
+  if (!s) return { error: "Document not found" };
+  const next = String(content ?? "");
+  if (next.length > LIMITS.MAX_FILE_BYTES) return { error: "Content too large" };
+  if (next === s.content) return { rev: s.rev, changed: false };
+
+  const op = buildReplaceOp(s.content, next);
+  const newRev = tx(() => {
+    const row = db
+      .prepare("SELECT doc_version FROM documents WHERE id = ?")
+      .get(documentId);
+    if (!row) throw new Error("Document vanished");
+    const rev = row.doc_version + 1;
+    db.prepare("UPDATE documents SET content = ?, doc_version = ?, updated_at = ? WHERE id = ?").run(
+      next,
+      rev,
+      Date.now(),
+      documentId
+    );
+    db.prepare(
+      "INSERT INTO document_operations (workspace_id, document_id, user_id, op, base_rev, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      room,
+      documentId,
+      userId || "system",
+      JSON.stringify(op.toJSON()),
+      row.doc_version,
+      rev,
+      Date.now()
+    );
+    return rev;
+  });
+
+  s.content = next;
+  s.rev = newRev;
+  s.recent.set(newRev, op);
+  if (s.recent.size > DOC_SYNC_MAX_OPS + 50) {
+    const minKeep = newRev - DOC_SYNC_MAX_OPS;
+    for (const k of s.recent.keys()) if (k < minKeep) s.recent.delete(k);
+  }
+  io.to(`ws:${room}`).emit("doc:op", {
+    documentId,
+    op: op.toJSON(),
+    rev: newRev,
+    by: userId || "system",
+  });
+  return { rev: newRev, changed: true };
+}
+
+function buildReplaceOp(before, after) {
+  let start = 0;
+  const max = Math.min(before.length, after.length);
+  while (start < max && before[start] === after[start]) start++;
+  let endA = before.length;
+  let endB = after.length;
+  while (endA > start && endB > start && before[endA - 1] === after[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const op = new TextOperation();
+  if (start) op.retain(start);
+  if (endA > start) op.delete(endA - start);
+  if (endB > start) op.insert(after.slice(start, endB));
+  return op;
+}
+
 // File deleted/renamed through the REST API → drop cached state
 export function invalidateDoc(documentId) {
   docs.delete(documentId);

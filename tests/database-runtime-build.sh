@@ -8,12 +8,12 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 
 FAKE_BIN="$TEST_ROOT/bin"
 mkdir -p "$FAKE_BIN"
-cat >"$FAKE_BIN/bun" <<'EOF'
+cat >"$FAKE_BIN/npm" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
 if [ "$#" -ne 2 ] || [ "$1" != "run" ] || [ "$2" != "db:push" ]; then
-    echo "unexpected bun invocation: $*" >&2
+    echo "unexpected npm invocation: $*" >&2
     exit 1
 fi
 
@@ -39,7 +39,7 @@ if [ ! -f "$db_path" ]; then
 fi
 printf '%s\n' "$DATABASE_URL" >>"${DB_PUSH_CALLS:?}"
 EOF
-chmod +x "$FAKE_BIN/bun"
+chmod +x "$FAKE_BIN/npm"
 
 export PATH="$FAKE_BIN:$PATH"
 export DB_PUSH_CALLS="$TEST_ROOT/db-push-calls"

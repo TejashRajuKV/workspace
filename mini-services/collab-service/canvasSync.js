@@ -15,6 +15,7 @@
 import { db, tx, nextVersion, getVersion } from "./db.js";
 import {
   OP,
+  LIMITS,
   validateCanvasOp,
   normalizeObjectPayload,
   SNAPSHOT_EVERY,
@@ -144,8 +145,54 @@ function applyToRow(op, workspaceId, userId, version, now) {
         "UPDATE canvas_objects SET z_index = ?, updated_at = ?, updated_version = ? WHERE id = ? AND workspace_id = ?"
       ).run(p.z, now, version, oid, workspaceId);
       return;
+    case OP.COMMENT: {
+      const loaded = loadPayload();
+      if (!loaded) return;
+      const payload = loaded.payload;
+      if (!payload.data || typeof payload.data !== "object") payload.data = {};
+      if (p.action === "reply") {
+        const thread = Array.isArray(payload.data.thread) ? payload.data.thread : [];
+        const authorName = usernameOf(userId);
+        const entry = {
+          id: p.entry.id,
+          authorId: userId,
+          authorName,
+          body: p.entry.body,
+          at: p.entry.at || now,
+        };
+        thread.push(entry);
+        payload.data.thread = thread.slice(-LIMITS.MAX_THREAD_ENTRIES);
+        // Enrich the op so the append-only log (and restore replay) keeps the author.
+        p.entry.authorId = userId;
+        p.entry.authorName = authorName;
+      } else if (p.action === "resolve") {
+        payload.data.resolved = p.resolved === true;
+      } else if (p.action === "edit") {
+        payload.data.text = p.text;
+      }
+      savePayload(payload);
+      return;
+    }
+    case OP.GROUP: {
+      const loaded = loadPayload();
+      if (!loaded) return;
+      const payload = loaded.payload;
+      if (p.groupId) payload.groupId = p.groupId;
+      else delete payload.groupId;
+      savePayload(payload);
+      return;
+    }
     default:
       return;
+  }
+}
+
+function usernameOf(userId) {
+  try {
+    const row = db.prepare("SELECT username FROM users WHERE id = ?").get(userId);
+    return row?.username || "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -175,6 +222,29 @@ export function processCanvasOps(io, socket, room, ops) {
 
       results.push({ id: raw?.id || null, ok: true, version });
       applied.push({ op, version });
+      if (op.type === OP.COMMENT && op.p.action === "reply") {
+        const thread = (() => {
+          try {
+            const row = db
+              .prepare("SELECT payload FROM canvas_objects WHERE id = ? AND workspace_id = ?")
+              .get(op.oid, room);
+            const parsed = row?.payload ? JSON.parse(row.payload) : null;
+            return Array.isArray(parsed?.data?.thread) ? parsed.data.thread : [];
+          } catch {
+            return [];
+          }
+        })();
+        notifyWeb("comment.created", {
+          workspaceId: room,
+          actorId: socket.data.userId,
+          payload: {
+            objectId: op.oid,
+            entryId: op.p.entry.id,
+            body: op.p.entry.body,
+            threadAuthorId: thread[0]?.authorId || "",
+          },
+        });
+      }
     } catch (err) {
       console.error("[canvas] apply failed:", err.message);
       results.push({ id: raw?.id || null, ok: false, error: "apply failed" });
@@ -431,6 +501,28 @@ function applyOpToRecord(o, op) {
     case OP.ZORDER:
       o.z = op.p.z;
       break;
+    case OP.COMMENT:
+      if (!p.data || typeof p.data !== "object") p.data = {};
+      if (op.p.action === "reply") {
+        const thread = Array.isArray(p.data.thread) ? p.data.thread : [];
+        thread.push({
+          id: op.p.entry.id,
+          authorId: op.p.entry.authorId || "",
+          authorName: op.p.entry.authorName || "unknown",
+          body: op.p.entry.body,
+          at: op.p.entry.at || 0,
+        });
+        p.data.thread = thread.slice(-LIMITS.MAX_THREAD_ENTRIES);
+      } else if (op.p.action === "resolve") {
+        p.data.resolved = op.p.resolved === true;
+      } else if (op.p.action === "edit") {
+        p.data.text = op.p.text;
+      }
+      break;
+    case OP.GROUP:
+      if (op.p.groupId) p.groupId = op.p.groupId;
+      else delete p.groupId;
+      break;
     default:
       break;
   }
@@ -438,3 +530,22 @@ function applyOpToRecord(o, op) {
 
 // materialize a CREATE payload coming from a snapshot record
 export { normalizeObjectPayload };
+
+// ---------------------------------------------------------------------------
+// Best-effort notification to the web process (automation + notifications).
+// ---------------------------------------------------------------------------
+const WEB_INTERNAL_URL = process.env.WEB_INTERNAL_URL || "http://127.0.0.1:3005";
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || "iw-internal-token";
+
+function notifyWeb(event, payload) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  fetch(`${WEB_INTERNAL_URL}/internal/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-internal-token": INTERNAL_TOKEN },
+    body: JSON.stringify({ event, ...payload }),
+    signal: ctrl.signal,
+  })
+    .catch(() => {})
+    .finally(() => clearTimeout(timer));
+}

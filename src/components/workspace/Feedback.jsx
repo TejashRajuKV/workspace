@@ -45,8 +45,8 @@ export function promptDialog({ title, message, defaultValue = "", placeholder = 
 }
 
 const TOAST_STYLE = {
-  info: { Icon: Info, cls: "text-sky-400" },
-  success: { Icon: CheckCircle2, cls: "text-emerald-400" },
+  info: { Icon: Info, cls: "text-[#f4a261]" },
+  success: { Icon: CheckCircle2, cls: "text-amber-400" },
   error: { Icon: AlertTriangle, cls: "text-red-400" },
 };
 
@@ -89,11 +89,11 @@ function Dialog({ dialog }) {
         onSubmit={submit}
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-sm rounded-xl border border-[#232b3b] bg-[#10141d] p-5 shadow-2xl"
+        className="w-full max-w-sm rounded-xl border border-[#43272e] bg-[#201317] p-5 shadow-2xl"
       >
-        <h3 className="text-sm font-semibold text-[#e6e9ef]">{dialog.title}</h3>
+        <h3 className="text-sm font-semibold text-[#fbeeda]">{dialog.title}</h3>
         {dialog.message && (
-          <p className="mt-1.5 text-xs text-[#8b94a7] leading-relaxed whitespace-pre-line">{dialog.message}</p>
+          <p className="mt-1.5 text-xs text-[#c3a596] leading-relaxed whitespace-pre-line">{dialog.message}</p>
         )}
         {isPrompt && (
           <input
@@ -128,19 +128,19 @@ export default function FeedbackHost() {
   return (
     <>
       {dialog && <Dialog key={dialog.id} dialog={dialog} />}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[110] flex flex-col items-center gap-2 pointer-events-none px-4">
+      <div className="fixed bottom-4 left-1/2 -transtone-x-1/2 z-[110] flex flex-col items-center gap-2 pointer-events-none px-4">
         {toasts.map((t) => {
           const { Icon, cls } = TOAST_STYLE[t.kind] || TOAST_STYLE.info;
           return (
             <div
               key={t.id}
               role="status"
-              className="pointer-events-auto flex items-center gap-2.5 max-w-md rounded-lg bg-[#161b26] border border-[#232b3b] pl-3 pr-2 py-2 text-sm text-[#e6e9ef] shadow-xl"
+              className="pointer-events-auto flex items-center gap-2.5 max-w-md rounded-lg bg-[#2a181d] border border-[#43272e] pl-3 pr-2 py-2 text-sm text-[#fbeeda] shadow-xl"
             >
               <Icon size={15} className={`flex-none ${cls}`} />
               <span className="min-w-0">{t.message}</span>
               <button
-                className="p-1 rounded text-[#5b6478] hover:text-white hover:bg-[#232b3b]"
+                className="p-1 rounded text-[#a1847a] hover:text-white hover:bg-[#43272e]"
                 onClick={() => dismissToast(t.id)}
                 aria-label="Dismiss"
               >

@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8bb7c8"/>
+      <stop offset="0.32" stop-color="#e8cfae"/>
+      <stop offset="0.52" stop-color="#f8d9a5"/>
+      <stop offset="0.62" stop-color="#f9c185"/>
+      <stop offset="0.72" stop-color="#f2a066"/>
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff3c4" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#ffe6a3" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ffd993" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillsFar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d88163"/>
+      <stop offset="1" stop-color="#b4553c"/>
+    </linearGradient>
+    <linearGradient id="hillsMid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b34a37"/>
+      <stop offset="1" stop-color="#8f352b"/>
+    </linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c8542f"/>
+      <stop offset="0.4" stop-color="#a83a26"/>
+      <stop offset="1" stop-color="#6d211d"/>
+    </linearGradient>
+    <linearGradient id="fieldGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7b267" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f7b267" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#sky)"/>
+
+  <!-- sun -->
+  <circle cx="420" cy="640" r="230" fill="url(#sunGlow)"/>
+  <circle cx="420" cy="640" r="105" fill="#ffe6a6"/>
+
+  <!-- clouds -->
+  <g fill="#fbe6cb" opacity="0.92">
+    <path d="M-40 360c60-70 160-78 214-30 52-44 150-40 186 24 66-18 128 16 138 76H-40z"/>
+    <path d="M1210 340c46-52 126-56 168-16 44-30 112-22 138 24 58-8 106 22 112 70h-440z"/>
+    <path d="M760 300c30-34 82-36 108-8 28-18 72-12 88 18 38-4 66 16 72 46H760z" opacity="0.7"/>
+  </g>
+  <g fill="#f6c9a8" opacity="0.75">
+    <ellipse cx="250" cy="470" rx="170" ry="14"/>
+    <ellipse cx="510" cy="500" rx="120" ry="9"/>
+    <ellipse cx="1030" cy="560" rx="210" ry="12"/>
+    <ellipse cx="1450" cy="500" rx="150" ry="10"/>
+  </g>
+
+  <!-- distant hills -->
+  <path d="M0 760 120 690 240 735 360 675 470 715 600 700 740 740 880 700 1010 735 1140 690 1280 720 1420 700 1600 745V1000H0z" fill="url(#hillsFar)"/>
+  <g fill="#8d352c" opacity="0.85">
+    <path d="M-10 748l28-36 28 36z"/><path d="M64 752l22-28 22 28z"/><path d="M128 744l26-34 26 34z"/>
+    <path d="M206 754l20-26 20 26z"/><path d="M268 746l24-32 24 32z"/><path d="M338 752l18-24 18 24z"/>
+    <path d="M402 745l25-33 25 33z"/>
+  </g>
+  <path d="M0 820 160 770 330 812 500 765 660 806 830 772 1000 812 1170 765 1340 806 1500 774 1600 800V1000H0z" fill="url(#hillsMid)"/>
+
+  <!-- windmill -->
+  <g transform="translate(1170 560)">
+    <path d="M-26 262h82l-14-190h-52z" fill="#4a5560"/>
+    <path d="M-30 262h90l-8-26h-74z" fill="#39434d"/>
+    <path d="M-32 78h92l-46-52z" fill="#d95f45"/>
+    <rect x="48" y="150" width="54" height="70" fill="#3a444e"/>
+    <path d="M40 150h70l-35-34z" fill="#5a6771"/>
+    <g stroke="#39434d" stroke-width="7" fill="none" stroke-linecap="round">
+      <path d="M14 74 128-40"/>
+      <path d="M14 74 128 188"/>
+      <path d="M14 74-100-40"/>
+      <path d="M14 74-100 188"/>
+    </g>
+    <g fill="#39434d">
+      <rect x="96" y="-70" width="62" height="20" rx="3" transform="rotate(-45 96 -70)"/>
+      <rect x="96" y="150" width="62" height="20" rx="3" transform="rotate(45 96 150)"/>
+      <rect x="-150" y="-70" width="62" height="20" rx="3" transform="rotate(45 -150 -70)"/>
+      <rect x="-150" y="150" width="62" height="20" rx="3" transform="rotate(-45 -150 150)"/>
+    </g>
+    <circle cx="14" cy="74" r="10" fill="#2f3942"/>
+    <path d="M-20 262v-34c0-14 10-24 24-24h30c14 0 24 10 24 24v34z" fill="#5a3030" opacity="0.55"/>
+  </g>
+
+  <!-- foreground field -->
+  <path d="M0 880c220-40 420-10 620 22 210 34 420 10 640-24 140-22 260-18 340-6V1000H0z" fill="url(#field)"/>
+  <path d="M0 900c260-26 520-4 780 26 220 24 500 2 820-34v70c-300 26-560 44-820 20-300-28-560-42-780-18z" fill="url(#fieldGlow)"/>
+
+  <!-- grass silhouettes -->
+  <g stroke="#5c1a18" stroke-linecap="round" fill="none" opacity="0.9">
+    <g stroke-width="12">
+      <path d="M40 1000c10-80 26-140 54-196"/><path d="M104 1000c6-70 20-126 44-176"/>
+      <path d="M170 1000c4-76 20-142 48-192"/><path d="M240 1000c0-66 14-120 38-166"/>
+      <path d="M306 1000c-2-72 12-132 40-184"/><path d="M376 1000c-4-60 10-112 34-156"/>
+      <path d="M446 1000c-2-78 14-138 42-192"/><path d="M520 1000c0-64 16-116 40-160"/>
+      <path d="M590 1000c2-72 18-130 46-182"/><path d="M664 1000c0-58 14-110 36-152"/>
+      <path d="M736 1000c-2-76 14-134 42-188"/><path d="M810 1000c0-66 16-118 40-162"/>
+      <path d="M884 1000c2-74 18-132 46-184"/><path d="M958 1000c-2-60 12-112 34-156"/>
+      <path d="M1030 1000c-4-78 12-136 40-190"/><path d="M1104 1000c2-66 18-118 42-162"/>
+      <path d="M1178 1000c0-74 16-132 44-184"/><path d="M1252 1000c-2-58 12-110 34-154"/>
+      <path d="M1324 1000c-2-76 14-134 42-188"/><path d="M1398 1000c0-66 16-118 40-162"/>
+      <path d="M1470 1000c2-74 18-132 46-184"/><path d="M1544 1000c-2-60 12-112 34-156"/>
+    </g>
+    <g stroke-width="6" stroke="#7a241d" opacity="0.8">
+      <path d="M72 1000c4-52 16-94 34-132"/><path d="M138 1000c2-48 14-86 30-122"/>
+      <path d="M208 1000c0-50 12-92 30-128"/><path d="M276 1000c-2-44 10-84 26-118"/>
+      <path d="M342 1000c0-48 12-90 30-126"/><path d="M412 1000c-2-42 10-80 26-114"/>
+      <path d="M484 1000c0-50 12-92 30-128"/><path d="M556 1000c-2-44 10-84 26-118"/>
+      <path d="M628 1000c0-48 12-90 30-126"/><path d="M700 1000c-2-42 10-80 26-114"/>
+      <path d="M772 1000c0-50 12-92 30-128"/><path d="M846 1000c-2-44 10-84 26-118"/>
+      <path d="M918 1000c0-48 12-90 30-126"/><path d="M990 1000c-2-42 10-80 26-114"/>
+      <path d="M1062 1000c0-50 12-92 30-128"/><path d="M1136 1000c-2-44 10-84 26-118"/>
+      <path d="M1208 1000c0-48 12-90 30-126"/><path d="M1280 1000c-2-42 10-80 26-114"/>
+      <path d="M1352 1000c0-50 12-92 30-128"/><path d="M1426 1000c-2-44 10-84 26-118"/>
+      <path d="M1498 1000c0-48 12-90 30-126"/>
+    </g>
+  </g>
+
+  <!-- small shrubs on the ridge -->
+  <g fill="#6d211d">
+    <ellipse cx="690" cy="872" rx="44" ry="12"/>
+    <ellipse cx="1050" cy="886" rx="56" ry="14"/>
+    <ellipse cx="1430" cy="876" rx="40" ry="10"/>
+  </g>
+</svg>
